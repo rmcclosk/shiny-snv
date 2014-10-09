@@ -1,17 +1,6 @@
 library(shiny)
 library(ggvis)
 
-all.paths <- function (d) {
-    # NA always goes last
-    if (length(unique(d$date)) == 1)
-        return(d$tumor.sample)
-    
-    min.date <- min(d$date, na.rm=T)
-    lapply(subset(d, date==min.date, select="tumor.sample"), function (s) {
-        sapply(all.paths(subset(d, is.na(date) | date != min.date)), function (p) c(s, p))
-    })
-}
-
 add.zero.row <- function (df) {
     names <- colnames(df)
     df <- rbind(df, rep(0, ncol(df)))
@@ -26,7 +15,13 @@ shinyServer(function(input, output) {
         min.depth <- aggregate(depth~chrom+pos+ref+alt, pd, min)
         min.depth <- min.depth[min.depth$depth >= input$depth,
                                c("chrom", "pos", "ref", "alt")]
-        pd <- merge(pd, min.depth)
+        pd <- merge(pd, min.depth, by=c("chrom", "pos", "ref", "alt"),
+                    suffixes=c("", ".min"))
+
+        min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
+        min.freqs <- subset(min.freqs, vaf <= input$maxmin)
+        pd <- merge(pd, min.freqs, by=c("chrom", "pos", "ref", "alt"),
+                    suffixes=c("", ".min"))
 
         if (!input$all.chrom) {
             pd <- subset(pd, chrom %in% input$chrom)
@@ -36,12 +31,13 @@ shinyServer(function(input, output) {
             pd <- subset(pd, class != "Silent")
         }
 
+        if (nrow(pd) == 0) return (add.zero.row(pd))
+
         max.date <- max(pd$date)
         late.samples <- unique(subset(pd, is.na(date) | date == max.date)$sample)
         pd <- subset(pd, sample == input$sample | !sample %in% late.samples)
 
-        if (nrow(pd) == 0)
-            return(add.zero.row(pd))
+        if (nrow(pd) == 0) return(add.zero.row(pd))
 
 	    if (input$order == "Highest fraction") {
 	        aggfun <- sum
@@ -53,8 +49,8 @@ shinyServer(function(input, output) {
 	    agg <- head(agg, input$n)
 	    pd <- merge(pd, agg, by=c("chrom", "pos", "ref", "alt"), 
               suffixes=c("", ".agg"))
-        if (nrow(pd) == 0) 
-            return (add.zero.row(pd))
+
+        if (nrow(pd) == 0) return (add.zero.row(pd))
         droplevels(pd[order(pd$date),])
     })
 
@@ -82,8 +78,7 @@ shinyServer(function(input, output) {
         vis <- plot.data %>% 
             ggvis(x=~factor(sample), y=~vaf) %>%
             add_axis("x", title="sample") %>%
-            add_axis("y", title="variant allele fraction") %>%
-            scale_numeric("y", domain = c(0, 1), nice = FALSE, clamp = TRUE)
+            add_axis("y", title="variant allele fraction") 
 
         if (input$color == "None") 
             vis <- vis %>% layer_points(key := ~key) 
