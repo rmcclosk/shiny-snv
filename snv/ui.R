@@ -1,4 +1,5 @@
 library(shiny)
+library(ggvis)
 
 shinyUI(fluidPage(
   titlePanel("Variant allele fractions through time"),
