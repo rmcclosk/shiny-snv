@@ -2,14 +2,14 @@
 library(ggplot2)
 
 sample.data <- read.table("metadata.csv", header=T)
-have.data <- file.exists(file.path("data", sample.data$tumor.sample))
-sample.data <- sample.data[have.data,]
+plots <- file.path("plots", paste0(sample.data$tumor.sample, ".png"))
+sample.data <- sample.data[file.exists(plots),]
 sample.data$date <- as.Date(sample.data$date, "%m/%d/%Y")
 
-seg.files <- Sys.glob(file.path("data", sample.data$tumor.sample, "*segs.txt"))
-all.segs <- do.call(rbind, lapply(seg.files, read.table, header=T))
-all.segs <- merge(all.segs, sample.data, by.x=c("Sample"), 
-                  by.y=c("tumor.sample"))
+#seg.files <- Sys.glob(file.path("data", sample.data$tumor.sample, "*segs.txt"))
+#all.segs <- do.call(rbind, lapply(seg.files, read.table, header=T))
+#all.segs <- merge(all.segs, sample.data, by.x=c("Sample"), 
+#                  by.y=c("tumor.sample"))
 
 #by(all.segs, all.segs$patient, function (d) {
 #    usamp <- unique(d$Sample)
