@@ -45,7 +45,8 @@ agg <- aggregate(idx~chrom+pos+ref+alt, d, function (idx) {
 })
 colnames(agg)[5] <- "max.change"
 
-agg2 <- aggregate(patient~chrom+pos+ref+alt, d, length)
+nunique <- function (x) length(unique(x))
+agg2 <- aggregate(patient~chrom+pos+ref+alt, d, nunique)
 colnames(agg2)[5] <- "n.patients"
 agg <- merge(agg, agg2)
 head(agg, 10)
