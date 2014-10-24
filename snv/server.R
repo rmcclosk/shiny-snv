@@ -52,7 +52,7 @@ shinyServer(function(input, output) {
 
         if (nrow(pd) == 0) return (add.zero.row(pd))
         pd <- droplevels(pd[order(pd$date),])
-        if (input$correct.purity) pd$vaf <- pd$vaf/pd$purity*100
+        if (input$correct.purity) pd$vaf <- pd$vaf*(pd$purity/100)
         pd
     })
 
