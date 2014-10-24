@@ -51,7 +51,9 @@ shinyServer(function(input, output) {
               suffixes=c("", ".agg"))
 
         if (nrow(pd) == 0) return (add.zero.row(pd))
-        droplevels(pd[order(pd$date),])
+        pd <- droplevels(pd[order(pd$date),])
+        if (input$correct.purity) pd$vaf <- pd$vaf/pd$purity*100
+        pd
     })
 
     tooltip <- function (x) {
