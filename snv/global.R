@@ -83,23 +83,17 @@ d$key <- 1:nrow(d)
 # find the maximum change of VAF between any pair of samples from any patient
 agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
     diffs <- all.diffs(d[idx,])
-
-    # TODO: remove this once the proper frequencies are in here
-    if (nrow(diffs) == 0) return(NA)
-
     diffs[which.max(abs(diffs))]
 })
 colnames(agg)[5] <- "max.change"
-agg
-quit()
 
+# list all patient ID's for each SNV
 agg2 <- aggregate(patient~chrom+pos+ref+alt, d, unique.list)
 colnames(agg2)[5] <- "patients"
-agg <- merge(agg, agg2)
+overall <- merge(agg, agg2)
 
-# todo: investigate NA's
-agg <- agg[!is.na(agg$max.change),]
+# combine everything into a single table
 keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene", "class", 
                "max.change", "patients")
-agg <- merge(d, agg)[,keep.cols]
-agg <- agg[!duplicated(agg),]
+overall <- merge(d, overall)[,keep.cols]
+overall <- overall[!duplicated(overall),]
