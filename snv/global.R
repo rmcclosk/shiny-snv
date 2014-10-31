@@ -1,34 +1,38 @@
 #!/usr/bin/env Rscript
 
-sample.info <- read.table("metadata.csv", header=T)
-sample.info$date <- as.Date(sample.info$date, "%m/%d/%Y")
+################################################################################
+# Constants
+################################################################################
 
-counts <- aggregate(tumor.sample~patient, sample.info, length)
-sample.info <- merge(sample.info, counts, by=c("patient"), 
-                     suffixes=c("", ".count"))
-sample.info <- sample.info[sample.info$tumor.sample.count > 1,]
+CHROMOSOMES <- c(1:22, "X", "Y")
 
-d <- read.table("freqs.dat", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
-d <- d[d$chrom %in% c(1:22, "X", "Y"),]
-d$chrom <- factor(d$chrom, levels=c(1:22, "X", "Y"))
-d <- d[d$depth > 0,]
-d$vaf <- d$alt.count/d$depth
+################################################################################
+# Helper functions
+################################################################################
 
-d <- merge(d, sample.info, by.x=c("patient", "sample"),
-                           by.y=c("patient", "tumor.sample"))
+# Find all differences in VAF between pairs of samples from different time
+# points in the same patient. d is a data.frame with at least the columns
+# "patient", "time.point", and "vaf". Return a vector with all pairwise
+# differences in VAF between samples of the same patient. For example,
+#
+#   patient     time.point      vaf
+#         1              1      0.5
+#         1              2      0.1
+#         2              1      0.4
+#         2              2      0.2
+#         2              2      0.5
+#
+# The returned vector would contain 0.4 (for the difference between the two
+# patient 1 samples), 0.2, and 0.1 (for the differences between the patient 2,
+# time point 1 sample and the other two patient 2 samples). It would *not*
+# include the value 0.3 (the two patient 2, time point 2 samples), because
+# these samples are from the same time point.
 
-# keep patients and samples in the same order
-d <- droplevels(d)
-d <- d[order(d$patient, d$date, d$sample, d$chrom, d$pos),]
-d$sample <- factor(d$sample, levels=unique(d$sample))
-
-# give a unique key so we can make a tooltip
-d$key <- 1:nrow(d)
-
-# find all differences in VAF between pairs of samples from different time
-# points in the same patient
+# Note that this assumes that tumors from different time points are related, so
+# that comparing them makes sense. This assumption would be violated if there
+# were multiple metastases at several time points.
 all.diffs <- function (d) {
-    if (nrow(d) == 1) return (NULL)
+    if (nrow(d) <= 1) return (NULL)
     first <- d[1,]
     rest <- subset(d, patient == first$patient & time.point != first$time.point)
     if (nrow(rest) > 0)
@@ -37,23 +41,65 @@ all.diffs <- function (d) {
         all.diffs(d[2:nrow(d),])
 }
 
-idx <- 1:nrow(d)
-agg <- aggregate(idx~chrom+pos+ref+alt, d, function (idx) {
-    if(length(idx) < 2) return(NA)
+# Concatenate the unique elements of x into a comma-separated string. For
+# example, if x = c("a", "b", "b", "d"), then the returned string would be
+# "a, b, c".
+unique.list <- function (x) paste(unique(as.character(x)), collapse=", ")
+
+################################################################################
+# Main
+################################################################################
+
+# read metadata
+metadata <- read.table("../metadata.tsv", header=T)
+
+# include only patients with at least two samples
+counts <- aggregate(sample~patient, metadata, length)
+keep.patients <- unique(counts[counts$sample > 1, "patient"])
+metadata <- metadata[metadata$patient %in% keep.patients,]
+
+# read SNV information
+d <- read.table("../snv.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
+d <- d[d$chrom %in% CHROMOSOMES,]
+d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
+d <- merge(d, metadata)
+
+# remove positions with depth 0 in any sample
+min.depth <- aggregate(depth~chrom+pos+ref+alt+patient, d, min)
+keep.rows <- which(min.depth$depth > 0)
+min.depth <- min.depth[keep.rows, c("chrom", "pos", "ref", "alt", "patient")]
+d <- merge(d, min.depth)
+
+# calculate variant allele frequencies
+d$vaf <- d$alt.count/d$depth
+
+# order by patient and sample
+d <- droplevels(d)
+d <- d[order(d$patient, d$time.point, d$sample, d$chrom, d$pos),]
+
+# give a unique key to each row
+d$key <- 1:nrow(d)
+
+# find the maximum change of VAF between any pair of samples from any patient
+agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
     diffs <- all.diffs(d[idx,])
+
+    # TODO: remove this once the proper frequencies are in here
+    if (nrow(diffs) == 0) return(NA)
+
     diffs[which.max(abs(diffs))]
 })
 colnames(agg)[5] <- "max.change"
+agg
+quit()
 
-nunique <- function (x) length(unique(x))
-agg2 <- aggregate(patient~chrom+pos+ref+alt, d, nunique)
-colnames(agg2)[5] <- "n.patients"
+agg2 <- aggregate(patient~chrom+pos+ref+alt, d, unique.list)
+colnames(agg2)[5] <- "patients"
 agg <- merge(agg, agg2)
-head(agg, 10)
 
 # todo: investigate NA's
 agg <- agg[!is.na(agg$max.change),]
 keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene", "class", 
-               "max.change", "n.patients")
+               "max.change", "patients")
 agg <- merge(d, agg)[,keep.cols]
 agg <- agg[!duplicated(agg),]
