@@ -6,7 +6,7 @@ shinyUI(navbarPage("VAF",
   tabPanel("By patient",
     sidebarLayout(
       sidebarPanel(
-        selectInput("patient", "Patient ID:", levels(d$patient), multi=F),
+        uiOutput("patient.select"),
         uiOutput("sample.select"),
         uiOutput("chrom.select"),
         checkboxInput("all.chrom", "Select all chromosomes", value=T),
