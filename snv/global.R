@@ -5,6 +5,7 @@
 ################################################################################
 
 CHROMOSOMES <- c(1:22, "X", "Y")
+SNV.COLS <- c("chrom", "pos", "ref", "alt")
 
 ################################################################################
 # Helper functions
@@ -12,10 +13,11 @@ CHROMOSOMES <- c(1:22, "X", "Y")
 
 # Find all differences in VAF between pairs of samples from different time
 # points in the same patient. d is a data.frame with at least the columns
-# "patient", "time.point", and "vaf". Return a vector with all pairwise
-# differences in VAF between samples of the same patient. For example,
+# "patient", "time.point", and a third column specified in the "col" parameter.
+# Return a vector with all pairwise differences in VAF between samples of the
+# same patient. For example,
 #
-#   patient     time.point      vaf
+#   patient     time.point      col
 #         1              1      0.5
 #         1              2      0.1
 #         2              1      0.4
@@ -31,20 +33,30 @@ CHROMOSOMES <- c(1:22, "X", "Y")
 # Note that this assumes that tumors from different time points are related, so
 # that comparing them makes sense. This assumption would be violated if there
 # were multiple metastases at several time points.
-all.diffs <- function (d) {
+all.diffs <- function (d, col) {
     if (nrow(d) <= 1) return (NULL)
     first <- d[1,]
     rest <- subset(d, patient == first$patient & time.point != first$time.point)
     if (nrow(rest) > 0)
-        c(first$vaf - rest$vaf, all.diffs(d[2:nrow(d),]))
+        c(first[[col]] - rest[[col]], all.diffs(d[2:nrow(d),], col))
     else
-        all.diffs(d[2:nrow(d),])
+        all.diffs(d[2:nrow(d),], col)
 }
 
 # Concatenate the unique elements of x into a comma-separated string. For
 # example, if x = c("a", "b", "b", "d"), then the returned string would be
 # "a, b, c".
-unique.list <- function (x) paste(unique(as.character(x)), collapse=", ")
+paste.unique <- function (x) { 
+    paste(unique(as.character(x)), collapse=", ")
+}
+
+# Add a row of all zeros to an empty data.frame, preserving column names.
+add.zero.row <- function (df) {
+    names <- colnames(df)
+    df <- rbind(df, rep(0, ncol(df)))
+    colnames(df) <- names
+    df
+}
 
 ################################################################################
 # Main
@@ -54,7 +66,8 @@ unique.list <- function (x) paste(unique(as.character(x)), collapse=", ")
 metadata <- read.table("../metadata.tsv", header=T)
 
 # include only patients with at least two samples
-counts <- aggregate(sample~patient, metadata, length)
+tumor.samples <- subset(metadata, time.point != 0)
+counts <- aggregate(sample~patient, tumor.samples, length)
 keep.patients <- unique(counts[counts$sample > 1, "patient"])
 metadata <- metadata[metadata$patient %in% keep.patients,]
 
@@ -63,15 +76,24 @@ d <- read.table("../snv.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", "")
 d <- d[d$chrom %in% CHROMOSOMES,]
 d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
 d <- merge(d, metadata)
+d <- d[d$time.point != 0,]
 
 # remove positions with depth 0 in any sample
 min.depth <- aggregate(depth~chrom+pos+ref+alt+patient, d, min)
 keep.rows <- which(min.depth$depth > 0)
-min.depth <- min.depth[keep.rows, c("chrom", "pos", "ref", "alt", "patient")]
+min.depth <- min.depth[keep.rows, c(SNV.COLS, "patient")]
 d <- merge(d, min.depth)
 
 # calculate variant allele frequencies
 d$vaf <- d$alt.count/d$depth
+
+# calculate corrected VAF by highest peak to 0.5
+peaks <- aggregate(vaf~sample, d, function (x) {
+    dens <- density(x[x >= 0.1])
+    dens$x[which.max(dens$y)]
+})
+d <- merge(d, peaks, by=c("sample"), suffixes=c("", ".peak"))
+d$vaf.corrected <- d$vaf/(2*d$vaf.peak)
 
 # order by patient and sample
 d <- droplevels(d)
@@ -82,18 +104,26 @@ d$key <- 1:nrow(d)
 
 # find the maximum change of VAF between any pair of samples from any patient
 agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
-    diffs <- all.diffs(d[idx,])
+    diffs <- all.diffs(d[idx,], "vaf")
     diffs[which.max(abs(diffs))]
 })
 colnames(agg)[5] <- "max.change"
 
+# same thing but with corrected VAF
+agg2 <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
+    diffs <- all.diffs(d[idx,], "vaf.corrected")
+    diffs[which.max(abs(diffs))]
+})
+colnames(agg2)[5] <- "max.change.corrected"
+
 # list all patient ID's for each SNV
-agg2 <- aggregate(patient~chrom+pos+ref+alt, d, unique.list)
-colnames(agg2)[5] <- "patients"
-overall <- merge(agg, agg2)
+agg3 <- aggregate(patient~chrom+pos+ref+alt, d, paste.unique)
+colnames(agg3)[5] <- "patients"
+overall <- merge(merge(agg, agg2), agg3)
+head(overall, 10)
 
 # combine everything into a single table
 keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene", "class", 
-               "max.change", "patients")
+               "max.change", "max.change.corrected", "patients")
 overall <- merge(d, overall)[,keep.cols]
 overall <- overall[!duplicated(overall),]

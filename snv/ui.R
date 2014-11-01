@@ -18,7 +18,7 @@ shinyUI(navbarPage("VAF",
         sliderInput("n", "Number to show:", min=0, max=100, step=1, value=20),
         selectInput("order", "Order by:", c("Highest fraction", "Most change")),
         sliderInput("maxmin", "Must fall below:", min=0, max=1, value=1),
-        checkboxInput("correct.purity", "Divide by estimated tumor purity")
+        checkboxInput("correct.purity", "Correct VAF peak to 0.5")
       ),
   
       mainPanel(
