@@ -131,6 +131,9 @@ shinyServer(function(input, output) {
     freqPlot.vis %>% bind_shiny("freqPlot")
 
     output$freqTable <- renderDataTable({
-        overall
+        if (input$hide.silent.table)
+            subset(overall, class != "Silent")
+        else
+            overall
     })
 })

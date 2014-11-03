@@ -28,6 +28,13 @@ shinyUI(navbarPage("VAF",
   ),
 
   tabPanel("Overall",
-    dataTableOutput("freqTable")
+    fluidPage(
+        fluidRow( 
+            column(12, wellPanel(
+                checkboxInput("hide.silent.table", "Hide silent mutations")
+            ))
+        ),
+        fluidRow( column(12, dataTableOutput("freqTable") ))
+    )
   )
 ))
