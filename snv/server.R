@@ -131,9 +131,13 @@ shinyServer(function(input, output) {
     freqPlot.vis %>% bind_shiny("freqPlot")
 
     output$freqTable <- renderDataTable({
+        keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene",
+                       "class", "max.change", "max.change.corrected",
+                       "patients")
         if (input$hide.silent.table)
-            subset(overall, class != "Silent")
+            ft <- subset(d, class != "Silent", select=keep.cols)
         else
-            overall
+            ft <- subset(d, select=keep.cols)
+        ft[!duplicated(ft),]
     })
 })

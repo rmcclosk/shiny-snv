@@ -65,65 +65,67 @@ add.zero.row <- function (df) {
 # read metadata
 metadata <- read.table("../metadata.tsv", header=T)
 
-# include only patients with at least two samples
-tumor.samples <- subset(metadata, time.point != 0)
-counts <- aggregate(sample~patient, tumor.samples, length)
-keep.patients <- unique(counts[counts$sample > 1, "patient"])
-metadata <- metadata[metadata$patient %in% keep.patients,]
-
-# read SNV information
-d <- read.table("../snv.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
-d <- d[d$chrom %in% CHROMOSOMES,]
-d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
-d <- merge(d, metadata)
-d <- d[d$time.point != 0,]
-
-# remove positions with depth 0 in any sample
-min.depth <- aggregate(depth~chrom+pos+ref+alt+patient, d, min)
-keep.rows <- which(min.depth$depth > 0)
-min.depth <- min.depth[keep.rows, c(SNV.COLS, "patient")]
-d <- merge(d, min.depth)
-
-# calculate variant allele frequencies
-d$vaf <- d$alt.count/d$depth
-
-# calculate corrected VAF by highest peak to 0.5
-peaks <- aggregate(vaf~sample, d, function (x) {
-    dens <- density(x[x >= 0.1])
-    dens$x[which.max(dens$y)]
-})
-d <- merge(d, peaks, by=c("sample"), suffixes=c("", ".peak"))
-d$vaf.corrected <- d$vaf/(2*d$vaf.peak)
-
-# order by patient and sample
-d <- droplevels(d)
-d <- d[order(d$patient, d$time.point, d$sample, d$chrom, d$pos),]
-
-# give a unique key to each row
-d$key <- 1:nrow(d)
-
-# find the maximum change of VAF between any pair of samples from any patient
-agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
-    diffs <- all.diffs(d[idx,], "vaf")
-    diffs[which.max(abs(diffs))]
-})
-colnames(agg)[5] <- "max.change"
-
-# same thing but with corrected VAF
-agg2 <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
-    diffs <- all.diffs(d[idx,], "vaf.corrected")
-    diffs[which.max(abs(diffs))]
-})
-colnames(agg2)[5] <- "max.change.corrected"
-
-# list all patient ID's for each SNV
-agg3 <- aggregate(patient~chrom+pos+ref+alt, d, paste.unique)
-colnames(agg3)[5] <- "patients"
-overall <- merge(merge(agg, agg2), agg3)
-head(overall, 10)
-
-# combine everything into a single table
-keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene", "class", 
-               "max.change", "max.change.corrected", "patients")
-overall <- merge(d, overall)[,keep.cols]
-overall <- overall[!duplicated(overall),]
+if (file.exists("vaf_processed.tsv")) {
+    d <- read.table("vaf_processed.tsv", sep="\t", header=T)
+} else {
+    # include only patients with at least two samples
+    tumor.samples <- subset(metadata, time.point != 0)
+    counts <- aggregate(sample~patient, tumor.samples, length)
+    keep.patients <- unique(counts[counts$sample > 1, "patient"])
+    metadata <- metadata[metadata$patient %in% keep.patients,]
+    
+    # read SNV information
+    d <- read.table("../snv.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
+    d <- d[d$chrom %in% CHROMOSOMES,]
+    d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
+    d <- merge(d, metadata)
+    d <- d[d$time.point != 0,]
+    
+    # remove positions with depth 0 in any sample
+    min.depth <- aggregate(depth~chrom+pos+ref+alt+patient, d, min)
+    keep.rows <- which(min.depth$depth > 0)
+    min.depth <- min.depth[keep.rows, c(SNV.COLS, "patient")]
+    d <- merge(d, min.depth)
+    
+    # calculate variant allele frequencies
+    d$vaf <- d$alt.count/d$depth
+    
+    # calculate corrected VAF by highest peak to 0.5
+    peaks <- aggregate(vaf~sample, d, function (x) {
+        dens <- density(x[x >= 0.1])
+        dens$x[which.max(dens$y)]
+    })
+    d <- merge(d, peaks, by=c("sample"), suffixes=c("", ".peak"))
+    d$vaf.corrected <- d$vaf/(2*d$vaf.peak)
+    
+    # order by patient and sample
+    d <- droplevels(d)
+    d <- d[order(d$patient, d$time.point, d$sample, d$chrom, d$pos),]
+    
+    # give a unique key to each row
+    d$key <- 1:nrow(d)
+    
+    # find the maximum change of VAF between any pair of samples from any patient
+    agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
+        diffs <- all.diffs(d[idx,], "vaf")
+        diffs[which.max(abs(diffs))]
+    })
+    colnames(agg)[5] <- "max.change"
+    
+    # same thing but with corrected VAF
+    agg2 <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
+        diffs <- all.diffs(d[idx,], "vaf.corrected")
+        diffs[which.max(abs(diffs))]
+    })
+    colnames(agg2)[5] <- "max.change.corrected"
+    
+    # list all patient ID's for each SNV
+    agg3 <- aggregate(patient~chrom+pos+ref+alt, d, paste.unique)
+    colnames(agg3)[5] <- "patients"
+    
+    # merge everything
+    overall <- merge(merge(agg, agg2), agg3)
+    d <- merge(d, overall)
+    
+    write.table(d, file="vaf_processed.tsv", sep="\t", row.names=F, quote=F)
+}
