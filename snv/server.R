@@ -80,7 +80,11 @@ shinyServer(function(input, output) {
 
     tooltip <- function (x) {
         pd <- isolate(plot.data())
-        point <- pd[pd$key == x$key,]
+        if (is.null(x$key)) {
+            point <- subset(pd, chrom==x$chrom & pos==x$pos & ref==x$ref & alt==x$alt)[1,]
+        } else {
+            point <- pd[pd$key == x$key,]
+        }
         if (nrow(point) == 0) return ("")
         html <- paste0("<b>Chromosome: </b>", point$chrom, "</b><br />")
         html <- paste0(html, "<b>Position: </b>", point$pos, "</b><br />")
