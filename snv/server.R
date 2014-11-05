@@ -1,43 +1,67 @@
 library(shiny)
 library(ggvis)
 
-add.zero.row <- function (df) {
-    names <- colnames(df)
-    df <- rbind(df, rep(0, ncol(df)))
-    colnames(df) <- names
-    df
-}
-
 shinyServer(function(input, output) {
 
+    # selector box for patients
+    output$patient.select <- renderUI({
+        selectInput("patient", "Patient:", levels(d$patient))
+    })
+
+    # selector boxes for samples at each time point
+    # TODO: should be disabled when only one sample is available
+    output$sample.select <- renderUI({
+        m <- subset(metadata, patient==input$patient & time.point != 0)
+        do.call(tagList, as.list(by(m, m$time.point, function (s) {
+            tp <- s[1, "time.point"]
+            var <- paste0("tp", tp)
+            label <- paste0("Time point ", tp, " sample:") 
+            choices <- unique(as.character(s$sample))
+            html <- selectInput(var, label, choices)
+        })))
+    })
+
+    # select box for chromosomes
+    output$chrom.select <- renderUI({
+        html <- selectInput("chrom", "Chromosome:", levels(d$chrom), multi=T, selected=input$chrom)
+        if (input$all.chrom) 
+            gsub("(<select[^>]*)>", "\\1 disabled>", html)
+        else
+            html
+    })
+
     plot.data <- reactive({
-        pd <- subset(d, patient == input$patient)
-        min.depth <- aggregate(depth~chrom+pos+ref+alt, pd, min)
-        min.depth <- min.depth[min.depth$depth >= input$depth,
-                               c("chrom", "pos", "ref", "alt")]
-        pd <- merge(pd, min.depth, by=c("chrom", "pos", "ref", "alt"),
-                    suffixes=c("", ".min"))
+        pd <- subset(d, patient == input$patient & time.point != 0)
 
-        min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
-        min.freqs <- subset(min.freqs, vaf <= input$maxmin)
-        pd <- merge(pd, min.freqs, by=c("chrom", "pos", "ref", "alt"),
-                    suffixes=c("", ".min"))
+        # filter chromosomes
+        if (!input$all.chrom) pd <- subset(pd, chrom %in% input$chrom)
 
-        if (!input$all.chrom) {
-            pd <- subset(pd, chrom %in% input$chrom)
-        }
-        
-        if (input$hide.silent) {
-            pd <- subset(pd, class != "Silent")
-        }
+        # filter silent mutations
+        if (input$hide.silent) pd <- subset(pd, class != "Silent")
 
         if (nrow(pd) == 0) return (add.zero.row(pd))
 
-        max.date <- max(pd$date)
-        late.samples <- unique(subset(pd, is.na(date) | date == max.date)$sample)
-        pd <- subset(pd, sample == input$sample | !sample %in% late.samples)
+        # remove SNVs which fall below minimum coverage depth in any sample
+        min.depth <- aggregate(depth~chrom+pos+ref+alt, pd, min)
+        min.depth <- subset(min.depth, depth >= input$depth, select=SNV.COLS)
+        pd <- merge(pd, min.depth, by=SNV.COLS, suffixes=c("", ".min"))
 
-        if (nrow(pd) == 0) return(add.zero.row(pd))
+        # keep only SNVs which fall below a threshold in some sample
+        if (input$correct.purity) {
+            min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
+            min.freqs <- subset(min.freqs, vaf <= input$maxmin)
+        } else {
+            min.freqs <- aggregate(vaf.corrected~chrom+pos+ref+alt, pd, min)
+            min.freqs <- subset(min.freqs, vaf.corrected <= input$maxmin)
+        }
+        pd <- merge(pd, min.freqs, by=SNV.COLS, suffixes=c("", ".min"))
+
+        samples <- sapply(unique(pd$time.point), function (tp) {
+            input[[paste0("tp", tp)]]
+        })
+        pd <- pd[pd$sample %in% samples,]
+
+        if (nrow(pd) == 0) return (add.zero.row(pd))
 
 	    if (input$order == "Highest fraction") {
 	        aggfun <- sum
@@ -47,18 +71,20 @@ shinyServer(function(input, output) {
 	    agg <- aggregate(vaf~chrom+pos+ref+alt, pd, aggfun)
 	    agg <- agg[order(-agg$vaf),]
 	    agg <- head(agg, input$n)
-	    pd <- merge(pd, agg, by=c("chrom", "pos", "ref", "alt"), 
-              suffixes=c("", ".agg"))
+        pd <- merge(pd, agg, by=SNV.COLS, suffixes=c("", ".agg"))
 
-        if (nrow(pd) == 0) return (add.zero.row(pd))
-        pd <- droplevels(pd[order(pd$date),])
-        if (input$correct.purity) pd$vaf <- pd$vaf/(pd$purity/100)
+        pd <- droplevels(pd[order(pd$time.point),])
+        if (input$correct.purity) pd$vaf <- pd$vaf.corrected
         pd
     })
 
     tooltip <- function (x) {
         pd <- isolate(plot.data())
-        point <- pd[pd$key == x$key,]
+        if (is.null(x$key)) {
+            point <- subset(pd, chrom==x$chrom & pos==x$pos & ref==x$ref & alt==x$alt)[1,]
+        } else {
+            point <- pd[pd$key == x$key,]
+        }
         if (nrow(point) == 0) return ("")
         html <- paste0("<b>Chromosome: </b>", point$chrom, "</b><br />")
         html <- paste0(html, "<b>Position: </b>", point$pos, "</b><br />")
@@ -76,6 +102,7 @@ shinyServer(function(input, output) {
         html
     }
 
+    # main plot
     freqPlot.vis <- reactive({
         vis <- plot.data %>% 
             ggvis(x=~factor(sample), y=~vaf) %>%
@@ -101,28 +128,16 @@ shinyServer(function(input, output) {
         vis %>% add_tooltip(tooltip, "hover")
     })
 
-    output$chrom.select <- renderUI({
-        html <- selectInput("chrom", "Chromosome:", levels(d$chrom), multi=T, selected=input$chrom)
-        if (input$all.chrom) 
-            gsub("(<select[^>]*)>", "\\1 disabled>", html)
-        else
-            html
-    })
-
-    output$sample.select <- renderUI({
-        s <- subset(d, patient==input$patient, select=c("sample", "date"))
-        max.date <- max(s$date)
-        choices <- unique(subset(s, is.na(date) | date == max.date)$sample)
-        html <- selectInput("sample", "Late sample:", as.character(choices))
-        if (length(choices) == 1)
-            gsub("(<select[^>]*)>", "\\1 disabled>", html)
-        else
-            html
-    })
-
     freqPlot.vis %>% bind_shiny("freqPlot")
 
     output$freqTable <- renderDataTable({
-        agg
+        keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene",
+                       "class", "max.change", "max.change.corrected",
+                       "patients")
+        if (input$hide.silent.table)
+            ft <- subset(d, class != "Silent", select=keep.cols)
+        else
+            ft <- subset(d, select=keep.cols)
+        ft[!duplicated(ft),]
     })
 })

@@ -6,7 +6,7 @@ shinyUI(navbarPage("VAF",
   tabPanel("By patient",
     sidebarLayout(
       sidebarPanel(
-        selectInput("patient", "Patient ID:", levels(d$patient), multi=F),
+        uiOutput("patient.select"),
         uiOutput("sample.select"),
         uiOutput("chrom.select"),
         checkboxInput("all.chrom", "Select all chromosomes", value=T),
@@ -18,7 +18,7 @@ shinyUI(navbarPage("VAF",
         sliderInput("n", "Number to show:", min=0, max=100, step=1, value=20),
         selectInput("order", "Order by:", c("Highest fraction", "Most change")),
         sliderInput("maxmin", "Must fall below:", min=0, max=1, value=1),
-        checkboxInput("correct.purity", "Divide by estimated tumor purity")
+        checkboxInput("correct.purity", "Correct VAF peak to 0.5")
       ),
   
       mainPanel(
@@ -28,6 +28,13 @@ shinyUI(navbarPage("VAF",
   ),
 
   tabPanel("Overall",
-    dataTableOutput("freqTable")
+    fluidPage(
+        fluidRow( 
+            column(12, wellPanel(
+                checkboxInput("hide.silent.table", "Hide silent mutations")
+            ))
+        ),
+        fluidRow( column(12, dataTableOutput("freqTable") ))
+    )
   )
 ))
