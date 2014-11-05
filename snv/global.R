@@ -75,7 +75,7 @@ if (file.exists("vaf_processed.tsv")) {
     metadata <- metadata[metadata$patient %in% keep.patients,]
     
     # read SNV information
-    d <- read.table("../snv.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
+    d <- read.table("../vaf.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
     d <- d[d$chrom %in% CHROMOSOMES,]
     d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
     d <- merge(d, metadata)
