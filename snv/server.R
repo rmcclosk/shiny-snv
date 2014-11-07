@@ -46,14 +46,11 @@ shinyServer(function(input, output) {
         min.depth <- subset(min.depth, depth >= input$depth, select=SNV.COLS)
         pd <- merge(pd, min.depth, by=SNV.COLS, suffixes=c("", ".min"))
 
+        if (input$correct.purity) pd$vaf <- pd$vaf.corrected
+
         # keep only SNVs which fall below a threshold in some sample
-        if (input$correct.purity) {
-            min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
-            min.freqs <- subset(min.freqs, vaf <= input$maxmin)
-        } else {
-            min.freqs <- aggregate(vaf.corrected~chrom+pos+ref+alt, pd, min)
-            min.freqs <- subset(min.freqs, vaf.corrected <= input$maxmin)
-        }
+        min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
+        min.freqs <- subset(min.freqs, vaf <= input$maxmin)
         pd <- merge(pd, min.freqs, by=SNV.COLS, suffixes=c("", ".min"))
 
         samples <- sapply(unique(pd$time.point), function (tp) {
@@ -63,7 +60,6 @@ shinyServer(function(input, output) {
 
         if (nrow(pd) == 0) return (add.zero.row(pd))
 
-        if (input$correct.purity) pd$vaf <- pd$vaf.corrected
 	    if (input$order == "Highest fraction") {
 	        aggfun <- sum
 	    } else if (input$order == "Most change") {
