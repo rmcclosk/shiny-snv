@@ -63,6 +63,7 @@ shinyServer(function(input, output) {
 
         if (nrow(pd) == 0) return (add.zero.row(pd))
 
+        if (input$correct.purity) pd$vaf <- pd$vaf.corrected
 	    if (input$order == "Highest fraction") {
 	        aggfun <- sum
 	    } else if (input$order == "Most change") {
@@ -74,7 +75,6 @@ shinyServer(function(input, output) {
         pd <- merge(pd, agg, by=SNV.COLS, suffixes=c("", ".agg"))
 
         pd <- droplevels(pd[order(pd$time.point),])
-        if (input$correct.purity) pd$vaf <- pd$vaf.corrected
         pd
     })
 
