@@ -4,7 +4,8 @@
 # Constants
 ################################################################################
 
-CHROMOSOMES <- c(1:22, "X", "Y")
+options(warn=2)
+CHROMOSOMES <- c(1:22, "X")
 SNV.COLS <- c("chrom", "pos", "ref", "alt")
 
 ################################################################################
@@ -58,6 +59,30 @@ add.zero.row <- function (df) {
     df
 }
 
+# Correct variant allele fraction based on copy number and tumor purity.
+vaf.to.ccf <- function (vaf, tumor.purity, copy.number) {
+    avg.copies <- (copy.number*tumor.purity + 2*(1-tumor.purity))
+    if (copy.number <= 2 | vaf <= tumor.purity / avg.copies) {
+        vaf * (avg.copies) / tumor.purity
+    } else {
+        vaf * (avg.copies) / (tumor.purity * (copy.number - 1))
+    }
+}
+
+# find intervals which cover a set of points
+# points and intervals are assumed to be sorted
+find.intervals <- function (points, intervals, value) {
+    if (length(points) == 0) return (NULL)
+    if (nrow(intervals) == 0) return (rep(NA, length(points)))
+
+    if (points[1] < intervals[1,1])
+        c(NA, find.intervals(tail(points, -1), intervals, value))
+    else if (points[1] > intervals[1,2])
+        find.intervals(points, tail(intervals, -1), value)
+    else
+        c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
+}
+
 ################################################################################
 # Main
 ################################################################################
@@ -80,6 +105,10 @@ if (file.exists("vaf_processed.tsv")) {
     d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
     d <- merge(d, metadata)
     d <- d[d$time.point != 0,]
+
+    # read segments
+    segments <- read.table("../segments.tsv", header=T, sep="\t")
+    segments$chrom <- factor(segments$chrom, levels=CHROMOSOMES)
     
     # remove positions with depth 0 in any sample
     min.depth <- aggregate(depth~chrom+pos+ref+alt+patient, d, min)
@@ -90,20 +119,43 @@ if (file.exists("vaf_processed.tsv")) {
     # calculate variant allele frequencies
     d$vaf <- d$alt.count/d$depth
     
-    # calculate corrected VAF by highest peak to 0.5
+    # remove patients without segments
+    d <- d[d$sample %in% unique(segments$sample),]
+
+    # order by patient and sample
+    d <- droplevels(d)
+    d$sample <- factor(d$sample, levels=levels(segments$sample))
+    d <- d[order(d$patient, d$time.point, d$sample, d$chrom, d$pos),]
+    
+    # give a unique key to each row
+    d$key <- 1:nrow(d)
+
+    # find copy number for each allele
+    aggregate(key~sample+chrom, d, function (idx) {
+        data <- d[idx,]
+        by.sample <- data[1, "sample"]
+        by.chrom <- data[1, "chrom"]
+        intervals <- subset(segments, sample == by.sample & chrom == by.chrom,
+                            select=c("start", "end", "copy.number"))
+        d[idx,"copy.number"] <<- find.intervals(data$pos, intervals, "copy.number")
+    })
+    
+    print(nrow(unique(d[is.na(d$copy.number),c("chrom", "pos")])))
+
+    # remove alleles with no segment (TODO: investigate)
+    d <- d[!is.na(d$copy.number),]
+
+    quit()
+
+    # calculate corrected VAF
+    #d$vaf.corrected <- vaf.to.ccf(d$
+    
     peaks <- aggregate(vaf~sample, d, function (x) {
         dens <- density(x[x >= 0.1])
         dens$x[which.max(dens$y)]
     })
     d <- merge(d, peaks, by=c("sample"), suffixes=c("", ".peak"))
     d$vaf.corrected <- d$vaf/(2*d$vaf.peak)
-    
-    # order by patient and sample
-    d <- droplevels(d)
-    d <- d[order(d$patient, d$time.point, d$sample, d$chrom, d$pos),]
-    
-    # give a unique key to each row
-    d$key <- 1:nrow(d)
     
     # find the maximum change of VAF between any pair of samples from any patient
     agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
