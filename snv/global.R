@@ -62,11 +62,9 @@ add.zero.row <- function (df) {
 # Correct variant allele fraction based on copy number and tumor purity.
 vaf.to.ccf <- function (vaf, tumor.purity, copy.number) {
     avg.copies <- (copy.number*tumor.purity + 2*(1-tumor.purity))
-    if (copy.number <= 2 | vaf <= tumor.purity / avg.copies) {
-        vaf * (avg.copies) / tumor.purity
-    } else {
-        vaf * (avg.copies) / (tumor.purity * (copy.number - 1))
-    }
+    ifelse(copy.number <= 2 | vaf <= tumor.purity / avg.copies,
+           vaf * (avg.copies) / tumor.purity,
+           vaf * (avg.copies) / (tumor.purity * (copy.number - 1)))
 }
 
 # find intervals which cover a set of points
@@ -140,22 +138,11 @@ if (file.exists("vaf_processed.tsv")) {
         d[idx,"copy.number"] <<- find.intervals(data$pos, intervals, "copy.number")
     })
     
-    print(nrow(unique(d[is.na(d$copy.number),c("chrom", "pos")])))
-
     # remove alleles with no segment (TODO: investigate)
     d <- d[!is.na(d$copy.number),]
 
-    quit()
-
     # calculate corrected VAF
-    #d$vaf.corrected <- vaf.to.ccf(d$
-    
-    peaks <- aggregate(vaf~sample, d, function (x) {
-        dens <- density(x[x >= 0.1])
-        dens$x[which.max(dens$y)]
-    })
-    d <- merge(d, peaks, by=c("sample"), suffixes=c("", ".peak"))
-    d$vaf.corrected <- d$vaf/(2*d$vaf.peak)
+    d$vaf.corrected <- vaf.to.ccf(d$vaf, d$purity, d$copy.number)
     
     # find the maximum change of VAF between any pair of samples from any patient
     agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
