@@ -1,28 +1,12 @@
 #!/usr/bin/env Rscript
-library(ggplot2)
 
-sample.data <- read.table("metadata.csv", header=T)
-plots <- file.path("plots", paste0(sample.data$tumor.sample, ".png"))
-sample.data <- sample.data[file.exists(plots),]
-sample.data$date <- as.Date(sample.data$date, "%m/%d/%Y")
+segments <- read.table("../segments.tsv", header=T)
 
-#seg.files <- Sys.glob(file.path("data", sample.data$tumor.sample, "*segs.txt"))
-#all.segs <- do.call(rbind, lapply(seg.files, read.table, header=T))
-#all.segs <- merge(all.segs, sample.data, by.x=c("Sample"), 
-#                  by.y=c("tumor.sample"))
+n.unique <- function (x) length(unique(x))
+n.samples <- aggregate(sample~patient, segments, n.unique)
+keep.patients <- subset(n.samples, sample > 1, select=c("patient"))
+segments <- droplevels(merge(segments, keep.patients))
+segments$chrom <- factor(segments$chrom, levels=c(1:22, "X", "Y"))
 
-#by(all.segs, all.segs$patient, function (d) {
-#    usamp <- unique(d$Sample)
-#    sample.num <- sapply(d$Sample, function (s) {
-#        which(usamp==s) - as.integer(length(usamp)/2)
-#    })
-#    d$Copy_Number <- 0.1*sample.num + d$Copy_Number
-#
-#    ggplot(d, aes(x=Start_Position.bp., y=Copy_Number)) +
-#        geom_segment(aes(xend=End_Position.bp., yend=Copy_Number, colour=Sample)) +
-#        facet_wrap(~Chromosome, scales="free_x") +
-#        scale_x_discrete(breaks=NULL, name="") +
-#        scale_y_discrete(breaks=0:5, name="copy number") 
-#    outfile <- file.path("plots", paste0(d[1,"patient"], ".pdf"))
-#    ggsave(file=outfile, width=10)
-#})
+metadata <- read.table("../metadata.tsv", header=T)
+segments <- merge(segments, metadata)
