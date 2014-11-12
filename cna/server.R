@@ -4,10 +4,13 @@ library(ggplot2)
 shinyServer(function(input, output) {
     plot.samples <- reactive({
         m <- subset(metadata, patient==input$patient & time.point > 0)
-        samples <- sapply(sort(unique(m$time.point)), function (tp) {
-            input[[paste0("tp", tp)]]
+        sapply(sort(unique(m$time.point)), function (tp) {
+            s <- input[[paste0("tp", tp)]]
+            if (is.null(s))
+                subset(m, time.point==tp)$sample[1]
+            else
+                s
         })
-        if(is.null(samples[[1]])) NULL else samples
     })
 
     plot.purity <- reactive({
@@ -28,7 +31,6 @@ shinyServer(function(input, output) {
                          time.point=c(ps$time.point, ps$time.point))
 
         samples <- plot.samples()
-        if (is.null(samples)) return (ps)
 
         adj <- (1:length(samples))-floor(length(samples)/2)
         tmp <- data.frame(sample=samples, adj=adj)
@@ -48,14 +50,14 @@ shinyServer(function(input, output) {
                          purity=c(pv$purity/100, pv$purity/100))
 
         samples <- plot.samples()
-        if (is.null(samples)) return (pv)
 
         adj <- (1:length(samples))-floor(length(samples)/2)
         tmp <- data.frame(sample=samples, adj=adj)
 
         pv <- pv[pv$sample %in% samples,]
         pv <- merge(pv, tmp)
-        pv$pos <- pv$pos + max(pv$pos)/200*pv$adj
+        if (nrow(pv) > 0)
+            pv$pos <- pv$pos + max(pv$pos)/200*pv$adj
         droplevels(pv)
     })
 
@@ -66,7 +68,7 @@ shinyServer(function(input, output) {
             var <- paste0("tp", tp)
             label <- paste0("Time point ", tp, " sample:") 
             choices <- unique(as.character(s$sample))
-            html <- selectInput(var, label, choices)
+            selectInput(var, label, choices)
         })))
     })
 
