@@ -67,18 +67,32 @@ vaf.to.ccf <- function (vaf, tumor.purity, copy.number) {
            vaf * (avg.copies) / (tumor.purity * (copy.number - 1)))
 }
 
-# find intervals which cover a set of points
+# find intervals which are nearest to a set of points, and return the value
+# associated to each interval 
 # points and intervals are assumed to be sorted
 find.intervals <- function (points, intervals, value) {
     if (length(points) == 0) return (NULL)
-    if (nrow(intervals) == 0) return (rep(NA, length(points)))
+    if (nrow(intervals) == 1) return (rep(intervals[1,value], length(points)))
 
-    if (points[1] < intervals[1,1])
-        c(NA, find.intervals(tail(points, -1), intervals, value))
-    else if (points[1] > intervals[1,2])
-        find.intervals(points, tail(intervals, -1), value)
-    else
+    # first point is before current interval
+    if (points[1] < intervals[1,1]) {
         c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
+
+    # first point is between current and next interval
+    } else if (points[1] > intervals[1,2] & points[1] < intervals[2,1]) {
+        if (points[1] - intervals[1,2] <= intervals[2,1] - points[1])
+            c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
+        else
+            c(intervals[2,value], find.intervals(tail(points, -1), tail(intervals, -1), value))
+
+    # point is inside current interval
+    } else if (points[1] >= intervals[1,1] & points[1] <= intervals[1,2]) {
+        c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
+
+    # point is at or after start of next interval
+    } else {
+        find.intervals(points, tail(intervals, -1), value)
+    }
 }
 
 ################################################################################
@@ -138,9 +152,6 @@ if (file.exists("vaf_processed.tsv")) {
         d[idx,"copy.number"] <<- find.intervals(data$pos, intervals, "copy.number")
     })
     
-    # remove alleles with no segment (TODO: investigate)
-    d <- d[!is.na(d$copy.number),]
-
     # calculate corrected VAF
     d$vaf.corrected <- vaf.to.ccf(d$vaf, d$purity, d$copy.number)
     
