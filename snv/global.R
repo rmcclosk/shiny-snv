@@ -152,7 +152,7 @@ if (file.exists("vaf_processed.tsv")) {
     })
     
     # calculate corrected VAF
-    d$vaf.corrected <- vaf.to.ccf(d$vaf, d$purity, d$copy.number)
+    d$vaf.corrected <- vaf.to.ccf(d$vaf, d$purity/100, d$copy.number)
     
     # find the maximum change of VAF between any pair of samples from any patient
     agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
