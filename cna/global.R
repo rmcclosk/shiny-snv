@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
 
 segments <- read.table("../segments.tsv", header=T)
+variants <- read.table("../snv/vaf_processed.tsv", header=T, sep="\t")
 
 n.unique <- function (x) length(unique(x))
 n.samples <- aggregate(sample~patient, segments, n.unique)

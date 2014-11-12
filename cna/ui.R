@@ -12,7 +12,9 @@ shinyUI(fluidPage(
     ),
 
     mainPanel(
-      ggvisOutput("segPlot")
+      ggvisOutput("segPlot"),
+      br(),
+      ggvisOutput("vafPlot")
     )
   )
 ))
