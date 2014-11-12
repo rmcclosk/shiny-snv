@@ -4,7 +4,6 @@
 # Constants
 ################################################################################
 
-options(warn=2)
 CHROMOSOMES <- c(1:22, "X")
 SNV.COLS <- c("chrom", "pos", "ref", "alt")
 
