@@ -14,22 +14,14 @@ shinyServer(function(input, output) {
         })
     })
 
-    plot.purity <- reactive({
-        m <- subset(metadata, sample %in% plot.samples())
-        d <- data.frame(x=c(rep(0, nrow(m)), rep(max(plot.segments()$pos), nrow(m))), 
-                        y=rep(m$purity/100, 2),
-                        sample=rep(as.character(m$sample), 2))
-        d[order(d$sample),]
-    })
-
     plot.segments <- reactive({
         ps <- subset(segments, patient==input$patient)
         ps$sample <- as.character(ps$sample)
-        ps <- data.frame(pos=c(ps$adj.start, ps$adj.end), 
-                         copy.number=c(ps$copy.number, ps$copy.number),
-                         sample=c(ps$sample, ps$sample),
-                         segment=rep(1:nrow(ps), 2),
-                         time.point=c(ps$time.point, ps$time.point))
+        #ps <- data.frame(pos=c(ps$adj.start, ps$adj.end), 
+        #                 copy.number=c(ps$copy.number, ps$copy.number),
+        #                 sample=c(ps$sample, ps$sample),
+        #                 segment=rep(1:nrow(ps), 2),
+        #                 time.point=c(ps$time.point, ps$time.point))
 
         samples <- plot.samples()
 
@@ -39,7 +31,8 @@ shinyServer(function(input, output) {
         ps <- ps[ps$sample %in% samples,]
         ps <- merge(ps, tmp)
         ps$copy.number <- ps$copy.number + 0.1*ps$adj
-        droplevels(ps[order(ps$sample, ps$segment),])
+        #droplevels(ps[order(ps$sample, ps$segment),])
+        droplevels(ps)
     })
 
     plot.variants <- reactive({
@@ -73,41 +66,33 @@ shinyServer(function(input, output) {
         })))
     })
 
-    tooltip <- function (x) {
-        pd <- isolate(plot.variants())
-        if (is.null(x$key)) {
-            point <- subset(pd, chrom==x$chrom & pos==x$pos & ref==x$ref & alt==x$alt)[1,]
-        } else {
-            point <- pd[pd$key == x$key,]
-        }
-        if (nrow(point) == 0) return ("")
-        html <- paste0("<b>Chromosome: </b>", point$chrom, "</b><br />")
-        html <- paste0(html, "<b>Position: </b>", point$pos, "</b><br />")
-        html <- paste0(html, "<b>Reference: </b>", point$ref, "</b><br />")
-        html <- paste0(html, "<b>Variant: </b>", point$alt, "</b><br />")
-        html <- paste0(html, "<b>Gene: </b>", point$gene, "</b><br />")
-        if (!is.na(point$prot.change))
-            html <- paste0(html, "<b>Protein change: </b>", point$prot.change, "</b><br />")
-        if (!is.na(point$rs))
-            html <- paste0(html, "<b>dbSNP ID: </b>", point$rs, "</b><br />")
-        if (!is.na(point$cosmic))
-            html <- paste0(html, "<b>COSMIC ID: </b>", point$cosmic, "</b><br />")
-        if (!is.na(point$esp))
-            html <- paste0(html, "<b>ESP ID: </b>", point$esp, "</b><br />")
-        html
-    }
-
-    segPlot.vis <- reactive({
-        plot.segments %>% 
-            ggvis(x=~pos, y=~copy.number) %>%
-            add_axis("x", title="position") %>%
-            add_axis("y", title="copy number") %>%
-            scale_numeric("y", domain=c(0, 5), nice=F, round=T) %>%
-            group_by(segment) %>%
-            layer_paths(stroke=~sample, fill=~sample, strokeWidth:=10)
+    output$segPlot <- renderPlot({
+        d <- plot.segments()
+        starts <- sort(unique(d$chr.start))
+        breaks <- starts + c(diff(starts)/2, 50000000)
+        ggplot(d, aes(x=adj.start, y=copy.number, color=sample)) +
+            geom_segment(aes(xend=adj.end, yend=copy.number), size=3) +
+            theme_bw() +
+            ylab("copy number") +
+            xlab("chromosome") +
+            theme(axis.ticks.x=element_blank()) +
+            geom_segment(aes(x=chr.start, xend=chr.start, y=0, yend=5, group=chrom), color="grey", linetype="dashed") +
+            scale_x_continuous(breaks=breaks, labels=c(1:22, "X"))
     })
 
-    segPlot.vis %>% bind_shiny("segPlot")
+#    segPlot.vis <- reactive({
+#        plot.segments %>% 
+#            ggvis(x=~pos, y=~copy.number) %>%
+#            add_axis("x", title="position") %>%
+#            add_axis("y", title="copy number") %>%
+#            scale_numeric("y", domain=c(0, 5), nice=F, round=T) %>%
+#            group_by(segment) %>%
+#            layer_paths(stroke=~sample, fill=~sample, strokeWidth:=10) %>%
+#            layer_paths(data=chr.bounds, x=~x, y=~y, strokeWidth=~y) %>%
+#            scale_numeric("strokeWidth", range=c(0, 2))
+#    })
+#
+#    segPlot.vis %>% bind_shiny("segPlot")
 
     output$hclust <- renderPlot({
         n.samples <- nrow(subset(metadata, patient==input$patient & time.point > 0))

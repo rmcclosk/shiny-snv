@@ -13,12 +13,12 @@ metadata <- read.table("../metadata.tsv", header=T)
 segments <- merge(segments, metadata)
 
 chr.ends <- aggregate(end~chrom, segments, max)
-chr.ends$adj.start <- cumsum(c(0, tail(as.numeric(chr.ends$end), -1)))
-chr.ends <- chr.ends[,c("chrom", "adj.start")]
+chr.ends$chr.start <- cumsum(c(0, tail(as.numeric(chr.ends$end), -1)))
+chr.ends <- chr.ends[,c("chrom", "chr.start")]
 
 segments <- merge(segments, chr.ends)
-segments$adj.end <- as.numeric(segments$adj.start + segments$end)
-segments$adj.start <- as.numeric(segments$adj.start + segments$start)
+segments$adj.end <- as.numeric(segments$chr.start + segments$end)
+segments$adj.start <- as.numeric(segments$chr.start + segments$start)
 
 sample.dist <- function (s1, s2) {
     segs1 <- subset(segments, sample == s1, select=c(adj.start, adj.end, copy.number))
