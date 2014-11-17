@@ -1,5 +1,6 @@
 library(shiny)
 library(ggplot2)
+library(ggdendro)
 
 shinyServer(function(input, output) {
     plot.samples <- reactive({
@@ -22,9 +23,9 @@ shinyServer(function(input, output) {
     })
 
     plot.segments <- reactive({
-        ps <- subset(segments, patient==input$patient & chrom==input$chrom)
+        ps <- subset(segments, patient==input$patient)
         ps$sample <- as.character(ps$sample)
-        ps <- data.frame(pos=c(ps$start, ps$end), 
+        ps <- data.frame(pos=c(ps$adj.start, ps$adj.end), 
                          copy.number=c(ps$copy.number, ps$copy.number),
                          sample=c(ps$sample, ps$sample),
                          segment=rep(1:nrow(ps), 2),
@@ -101,23 +102,14 @@ shinyServer(function(input, output) {
             ggvis(x=~pos, y=~copy.number) %>%
             add_axis("x", title="position") %>%
             add_axis("y", title="copy number") %>%
-            scale_numeric("y", domain=c(0, 4), nice=F, round=T) %>%
+            scale_numeric("y", domain=c(0, 5), nice=F, round=T) %>%
             group_by(segment) %>%
             layer_paths(stroke=~sample, fill=~sample, strokeWidth:=10)
     })
 
     segPlot.vis %>% bind_shiny("segPlot")
 
-    vafPlot.vis <- reactive({
-        plot.variants %>%
-            ggvis(x=~pos, y=~vaf) %>%
-            add_axis("x", title="position") %>%
-            add_axis("y", title="variant allele fraction") %>%
-            group_by(sample) %>%
-            layer_lines(y=~purity, stroke=~sample, strokeDash := 10) %>%
-            group_by(pos, sample) %>%
-            layer_paths(stroke=~sample, fill=~sample, strokeWidth:=4)
+    output$hclust <- renderPlot({
+        ggdendrogram(hclusts[[input$patient]])
     })
-
-    vafPlot.vis %>% bind_shiny("vafPlot")
 })

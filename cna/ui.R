@@ -7,14 +7,13 @@ shinyUI(fluidPage(
   sidebarLayout(
     sidebarPanel(
       selectInput("patient", "Patient ID:", levels(segments$patient)),
-      uiOutput("sample.select"),
-      selectInput("chrom", "Chromosome:", levels(segments$chrom))
+      uiOutput("sample.select")
     ),
 
     mainPanel(
       ggvisOutput("segPlot"),
       br(),
-      ggvisOutput("vafPlot")
+      plotOutput("hclust")
     )
   )
 ))
