@@ -110,6 +110,8 @@ shinyServer(function(input, output) {
     segPlot.vis %>% bind_shiny("segPlot")
 
     output$hclust <- renderPlot({
-        ggdendrogram(hclusts[[input$patient]])
+        n.samples <- nrow(subset(metadata, patient==input$patient & time.point > 0))
+        if (n.samples > 2)
+            ggdendrogram(hclusts[[input$patient]])
     })
 })
