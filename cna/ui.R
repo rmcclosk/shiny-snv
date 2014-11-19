@@ -11,7 +11,8 @@ shinyUI(fluidPage(
     ),
 
     mainPanel(
-      ggvisOutput("segPlot"),
+      #ggvisOutput("segPlot"),
+      plotOutput("segPlot"),
       br(),
       plotOutput("hclust")
     )
