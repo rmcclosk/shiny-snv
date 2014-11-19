@@ -49,9 +49,11 @@ shinyServer(function(input, output) {
         if (input$correct.purity) pd$vaf <- pd$vaf.corrected
 
         # keep only SNVs which fall below a threshold in some sample
-        min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
-        min.freqs <- subset(min.freqs, vaf <= input$maxmin)
-        pd <- merge(pd, min.freqs, by=SNV.COLS, suffixes=c("", ".min"))
+        if (input$maxmin < 1) {
+            min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
+            min.freqs <- subset(min.freqs, vaf <= input$maxmin)
+            pd <- merge(pd, min.freqs, by=SNV.COLS, suffixes=c("", ".min"))
+        }
 
         samples <- sapply(unique(pd$time.point), function (tp) {
             input[[paste0("tp", tp)]]
