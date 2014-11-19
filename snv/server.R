@@ -126,7 +126,7 @@ shinyServer(function(input, output) {
 
     freqPlot.vis %>% bind_shiny("freqPlot")
 
-    output$freqTable <- renderDataTable({
+    overallTable <- reactive({
         keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene",
                        "class", "max.change", "max.change.corrected",
                        "patients")
@@ -136,4 +136,13 @@ shinyServer(function(input, output) {
             ft <- subset(d, select=keep.cols)
         ft[!duplicated(ft),]
     })
+
+    output$freqTable <- renderDataTable({
+        overallTable()
+    })
+
+    output$downloadData <- downloadHandler(
+        filename = function() { "data.csv" },
+        content = function(file) { write.csv(overallTable(), file) }
+    )
 })
