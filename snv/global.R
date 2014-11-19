@@ -38,7 +38,7 @@ all.diffs <- function (d, col) {
     first <- d[1,]
     rest <- subset(d, patient == first$patient & time.point != first$time.point)
     if (nrow(rest) > 0)
-        c(first[[col]] - rest[[col]], all.diffs(d[2:nrow(d),], col))
+        c(rest[[col]] - first[[col]], all.diffs(d[2:nrow(d),], col))
     else
         all.diffs(d[2:nrow(d),], col)
 }
