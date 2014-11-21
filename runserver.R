@@ -4,4 +4,4 @@ library(ggvis)
 library(shiny)
 library(methods)
 
-runApp("snv", launch.browser=F, port=3838)
+runApp("snv", launch.browser=F, port=3839)

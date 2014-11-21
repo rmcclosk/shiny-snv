@@ -131,7 +131,8 @@ shinyServer(function(input, output) {
     overallTable <- reactive({
         keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene",
                        "class", "max.change", "max.change.corrected",
-                       "patients")
+                       "patients", "max.change.uncorrected.samples", 
+                       "max.change.corrected.samples")
         if (input$hide.silent.table)
             ft <- subset(d, class != "Silent", select=keep.cols)
         else

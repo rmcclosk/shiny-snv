@@ -37,10 +37,13 @@ all.diffs <- function (d, col) {
     if (nrow(d) <= 1) return (NULL)
     first <- d[1,]
     rest <- subset(d, patient == first$patient & time.point != first$time.point)
-    if (nrow(rest) > 0)
-        c(rest[[col]] - first[[col]], all.diffs(d[2:nrow(d),], col))
-    else
+    if (nrow(rest) > 0) {
+        res <- c(rest[[col]] - first[[col]])
+        names(res) <- paste0(first[["sample"]], ", ", rest[["sample"]])
+        c(res, all.diffs(d[2:nrow(d),], col))
+    } else {
         all.diffs(d[2:nrow(d),], col)
+    }
 }
 
 # Concatenate the unique elements of x into a comma-separated string. For
@@ -157,16 +160,22 @@ if (file.exists("vaf_processed.tsv")) {
     # find the maximum change of VAF between any pair of samples from any patient
     agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
         diffs <- all.diffs(d[idx,], "vaf")
-        diffs[which.max(abs(diffs))]
+        max.idx <- which.max(abs(diffs))
+        c(diffs[max.idx], names(diffs)[max.idx])
     })
-    colnames(agg)[5] <- "max.change"
+    agg$max.change <- agg$key[,1]
+    agg$max.change.uncorrected.samples <- agg$key[,2]
+    agg <- agg[,c(SNV.COLS, "max.change", "max.change.uncorrected.samples")]
     
     # same thing but with corrected VAF
     agg2 <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
         diffs <- all.diffs(d[idx,], "vaf.corrected")
-        diffs[which.max(abs(diffs))]
+        max.idx <- which.max(abs(diffs))
+        c(diffs[max.idx], names(diffs)[max.idx])
     })
-    colnames(agg2)[5] <- "max.change.corrected"
+    agg2$max.change.corrected <- agg2$key[,1]
+    agg2$max.change.corrected.samples <- agg2$key[,2]
+    agg2 <- agg2[,c(SNV.COLS, "max.change.corrected", "max.change.corrected.samples")]
     
     # list all patient ID's for each SNV
     agg3 <- aggregate(patient~chrom+pos+ref+alt, d, paste.unique)
