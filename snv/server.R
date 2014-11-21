@@ -137,7 +137,10 @@ shinyServer(function(input, output) {
             ft <- subset(d, class != "Silent", select=keep.cols)
         else
             ft <- subset(d, select=keep.cols)
-        ft[!duplicated(ft),]
+        ft <- ft[!duplicated(ft),]
+        ft$max.change <- round(ft$max.change, 3)
+        ft$max.change.corrected <- round(ft$max.change.corrected, 3)
+        ft
     })
 
     output$freqTable <- renderDataTable({
