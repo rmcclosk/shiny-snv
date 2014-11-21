@@ -129,9 +129,9 @@ shinyServer(function(input, output) {
     freqPlot.vis %>% bind_shiny("freqPlot")
 
     overallTable <- reactive({
-        keep.cols <- c("chrom", "pos", "ref", "alt", "prot.change", "gene",
-                       "class", "max.change", "max.change.corrected",
-                       "patients", "max.change.uncorrected.samples", 
+        keep.cols <- c("chrom", "prot.change", "gene", "max.change",
+                       "max.change.corrected", "patients",
+                       "max.change.uncorrected.samples",
                        "max.change.corrected.samples")
         if (input$hide.silent.table)
             ft <- subset(d, class != "Silent", select=keep.cols)
