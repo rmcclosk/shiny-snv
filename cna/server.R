@@ -3,6 +3,8 @@ library(ggplot2)
 library(ggdendro)
 
 shinyServer(function(input, output) {
+
+    # get samples which will be displayed
     plot.samples <- reactive({
         m <- subset(metadata, patient==input$patient & time.point > 0)
         sapply(sort(unique(m$time.point)), function (tp) {
@@ -14,15 +16,10 @@ shinyServer(function(input, output) {
         })
     })
 
+    # get segments to plot
     plot.segments <- reactive({
         ps <- subset(segments, patient==input$patient)
         ps$sample <- as.character(ps$sample)
-        #ps <- data.frame(pos=c(ps$adj.start, ps$adj.end), 
-        #                 copy.number=c(ps$copy.number, ps$copy.number),
-        #                 sample=c(ps$sample, ps$sample),
-        #                 segment=rep(1:nrow(ps), 2),
-        #                 time.point=c(ps$time.point, ps$time.point))
-
         samples <- plot.samples()
 
         adj <- (1:length(samples))-floor(length(samples)/2)
@@ -31,30 +28,10 @@ shinyServer(function(input, output) {
         ps <- ps[ps$sample %in% samples,]
         ps <- merge(ps, tmp)
         ps$copy.number <- ps$copy.number + 0.1*ps$adj
-        #droplevels(ps[order(ps$sample, ps$segment),])
         droplevels(ps)
     })
 
-    plot.variants <- reactive({
-        pv <- subset(variants, patient==input$patient & chrom==input$chrom)
-        pv$sample <- as.character(pv$sample)
-        pv <- data.frame(pos=c(pv$pos, pv$pos),
-                         vaf=c(pv$vaf, pv$vaf.corrected),
-                         sample=c(pv$sample, pv$sample),
-                         purity=c(pv$purity/100, pv$purity/100))
-
-        samples <- plot.samples()
-
-        adj <- (1:length(samples))-floor(length(samples)/2)
-        tmp <- data.frame(sample=samples, adj=adj)
-
-        pv <- pv[pv$sample %in% samples,]
-        pv <- merge(pv, tmp)
-        if (nrow(pv) > 0)
-            pv$pos <- pv$pos + max(pv$pos)/200*pv$adj
-        droplevels(pv)
-    })
-
+    # render select boxes for patient samples
     output$sample.select <- renderUI({
         m <- subset(metadata, patient==input$patient & time.point != 0)
         do.call(tagList, as.list(by(m, m$time.point, function (s) {
@@ -66,6 +43,7 @@ shinyServer(function(input, output) {
         })))
     })
 
+    # plot segments
     output$segPlot <- renderPlot({
         d <- plot.segments()
         starts <- sort(unique(d$chr.start))
@@ -80,20 +58,7 @@ shinyServer(function(input, output) {
             scale_x_continuous(breaks=breaks, labels=c(1:22, "X"))
     })
 
-#    segPlot.vis <- reactive({
-#        plot.segments %>% 
-#            ggvis(x=~pos, y=~copy.number) %>%
-#            add_axis("x", title="position") %>%
-#            add_axis("y", title="copy number") %>%
-#            scale_numeric("y", domain=c(0, 5), nice=F, round=T) %>%
-#            group_by(segment) %>%
-#            layer_paths(stroke=~sample, fill=~sample, strokeWidth:=10) %>%
-#            layer_paths(data=chr.bounds, x=~x, y=~y, strokeWidth=~y) %>%
-#            scale_numeric("strokeWidth", range=c(0, 2))
-#    })
-#
-#    segPlot.vis %>% bind_shiny("segPlot")
-
+    # plot hierarchical clustering
     output$hclust <- renderPlot({
         n.samples <- nrow(subset(metadata, patient==input$patient & time.point > 0))
         if (n.samples > 2)

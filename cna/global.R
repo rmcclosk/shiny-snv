@@ -2,15 +2,14 @@
 
 segments <- read.table("../segments.tsv", header=T)
 variants <- read.table("../snv/vaf_processed.tsv", header=T, sep="\t")
+metadata <- read.table("../metadata.tsv", header=T)
+segments <- merge(segments, metadata)
 
 n.unique <- function (x) length(unique(x))
 n.samples <- aggregate(sample~patient, segments, n.unique)
 keep.patients <- subset(n.samples, sample > 1, select=c("patient"))
 segments <- droplevels(merge(segments, keep.patients))
 segments$chrom <- factor(segments$chrom, levels=c(1:22, "X", "Y"))
-
-metadata <- read.table("../metadata.tsv", header=T)
-segments <- merge(segments, metadata)
 
 chr.ends <- aggregate(end~chrom, segments, max)
 chr.ends$chr.start <- cumsum(c(0, tail(as.numeric(chr.ends$end), -1)))
@@ -31,6 +30,7 @@ sample.dist <- function (s1, s2) {
     sqrt(sum((diff*len)^2))
 }
 
+# hierarchical clustering for dendrograms
 hclusts <- lapply(levels(segments$patient), function (by.patient) {
     samples <- subset(metadata, patient==by.patient & time.point > 0)$sample
     m <- matrix(apply(expand.grid(samples, samples), 1, function (row) {
