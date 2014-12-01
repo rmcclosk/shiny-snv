@@ -1,0 +1,5 @@
+patient	sample	purity	time.point	bam.file	maf.file
+7	7N	NA	0	/path/to/7N.bam	NA
+7	7T	58	2	/path/to/01-2-007-4.bam	/path/to/01-2-007-4.maf
+9	9N	NA	0	/path/to/009-BF.bam	NA
+9	9T	92	1	/path/to/01-1-009-1.bam	/path/to/01-1-009-1.maf

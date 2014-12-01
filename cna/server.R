@@ -28,7 +28,15 @@ shinyServer(function(input, output) {
         ps <- ps[ps$sample %in% samples,]
         ps <- merge(ps, tmp)
         ps$copy.number <- ps$copy.number + 0.1*ps$adj
+        ps <- merge(ps, aggregate(prevalence~sample, ps, max))
         droplevels(ps)
+    })
+
+    # get SNV's to plot
+    plot.variants <- reactive({
+        d <- subset(variants, sample %in% plot.samples())
+        d$vaf.corrected[d$vaf.corrected > 1.5] <- 1.5
+        d
     })
 
     # render select boxes for patient samples
@@ -55,6 +63,20 @@ shinyServer(function(input, output) {
             xlab("chromosome") +
             theme(axis.ticks.x=element_blank()) +
             geom_segment(aes(x=chr.start, xend=chr.start, y=0, yend=5, group=chrom), color="grey", linetype="dashed") +
+            scale_x_continuous(breaks=breaks, labels=c(1:22, "X"))
+    })
+
+    output$vafPlot <- renderPlot({
+        d <- plot.variants()
+        starts <- sort(unique(d$chr.start))
+        breaks <- starts + c(diff(starts)/2, 50000000)
+        ggplot(d, aes(x=adj.pos, y=vaf.corrected, color=sample)) +
+            geom_point() +
+            theme_bw() +
+            ylab("corrected VAF") +
+            xlab("chromosome") +
+            theme(axis.ticks.x=element_blank()) +
+            geom_segment(aes(x=chr.start, xend=chr.start, y=0, yend=1.5, group=chrom), color="grey", linetype="dashed") +
             scale_x_continuous(breaks=breaks, labels=c(1:22, "X"))
     })
 

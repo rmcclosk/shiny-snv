@@ -62,8 +62,9 @@ add.zero.row <- function (df) {
 }
 
 # Correct variant allele fraction based on copy number and tumor purity.
-vaf.to.ccf <- function (vaf, tumor.purity, copy.number) {
-    avg.copies <- (copy.number*tumor.purity + 2*(1-tumor.purity))
+vaf.to.ccf <- function (vaf, tumor.purity, copy.number, prevalence) {
+    avg.tum.copies <- copy.number*prevalence + 2*(1-prevalence)
+    avg.copies <- (avg.tum.copies*tumor.purity + 2*(1-tumor.purity))
     ifelse(copy.number <= 2 | vaf <= tumor.purity / avg.copies,
            vaf * (avg.copies) / tumor.purity,
            vaf * (avg.copies) / (tumor.purity * (copy.number - 1)))
@@ -156,6 +157,11 @@ if (file.exists("vaf_processed.tsv")) {
     
     # calculate corrected VAF
     d$vaf.corrected <- vaf.to.ccf(d$vaf, d$purity/100, d$copy.number)
+    conf.int <- t(mapply(function (x, n) {
+        prop.test(x, n, conf.level=0.95, correct=F)$conf.int
+    }, d$alt.count, d$depth))
+    d$ci.lower <- vaf.to.ccf(conf.int[,1], d$purity/100, d$copy.number)
+    d$ci.upper <- vaf.to.ccf(conf.int[,2], d$purity/100, d$copy.number)
     
     # find the maximum change of VAF between any pair of samples from any patient
     agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
