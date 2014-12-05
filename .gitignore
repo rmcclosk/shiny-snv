@@ -1,2 +1,4 @@
-freqs.dat
-metadata.csv
+metadata.tsv
+segments.tsv
+variants.tsv
+*.pyc
