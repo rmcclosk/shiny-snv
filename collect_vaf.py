@@ -148,7 +148,7 @@ if __name__ == "__main__":
     reffile = pysam.Fastafile(args.reference)
     reader = csv.DictReader(open(args.metadata), delimiter="\t")
 
-    fields = ["patient", "sample", "chrom", "pos", "ref", "alt", "ref.count", 
+    fields = ["patient", "sample", "chr", "pos", "ref", "alt", "ref.count", 
               "alt.count", "depth", "gene", "class", "rs", "cosmic", "esp",
               "prot.change"]
     writer = csv.DictWriter(sys.stdout, delimiter="\t", fieldnames=fields)
@@ -201,16 +201,16 @@ if __name__ == "__main__":
                 # basics
                 row["patient"] = patient
                 row["sample"] = sample
-                row["chrom"], row["pos"], row["ref"], row["alt"] = key
+                row["chr"], row["pos"], row["ref"], row["alt"] = key
 
                 # get allele counts
                 if len(row["ref"]) == len(row["alt"]) == 1: # snv
-                    counts = count_bases(samfile, reffile, row["chrom"], int(row["pos"]))
+                    counts = count_bases(samfile, reffile, row["chr"], int(row["pos"]))
                     row["ref.count"] = counts[in_row["Reference_Allele"]]
                     row["alt.count"] = counts[in_row["Tumor_Seq_Allele1"]]
                     row["depth"] = sum(counts.values())
                 else: # indel
-                    counts = count_indels(samfile, reffile, row["chrom"], int(row["pos"]), row["ref"], row["alt"])
+                    counts = count_indels(samfile, reffile, row["chr"], int(row["pos"]), row["ref"], row["alt"])
                     row["ref.count"] = counts[0]
                     row["alt.count"] = counts[1]
                     row["depth"] = sum(counts)
