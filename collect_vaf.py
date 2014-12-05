@@ -141,16 +141,16 @@ if __name__ == "__main__":
 
     desc = "Collect VAF from multiple BAM files."
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument("metadata", metavar="M")
-    parser.add_argument("reference", metavar="R")
+    parser.add_argument("metadata")
+    parser.add_argument("reference")
     args = parser.parse_args()
 
     reffile = pysam.Fastafile(args.reference)
     reader = csv.DictReader(open(args.metadata), delimiter="\t")
 
-    fields = ["patient", "sample", "chr", "pos", "ref", "alt", "ref.count", 
-              "alt.count", "depth", "gene", "class", "rs", "cosmic", "esp",
-              "prot.change"]
+    fields = ["patient", "sample", "chr", "start", "end", "ref", "alt",
+              "ref.count", "alt.count", "depth", "gene", "class", "rs",
+              "cosmic", "esp", "prot.change"]
     writer = csv.DictWriter(sys.stdout, delimiter="\t", fieldnames=fields)
     writer.writeheader()
 
@@ -201,7 +201,8 @@ if __name__ == "__main__":
                 # basics
                 row["patient"] = patient
                 row["sample"] = sample
-                row["chr"], row["pos"], row["ref"], row["alt"] = key
+                row["chr"], row["start"], row["ref"], row["alt"] = key
+                row["end"] = row["start"] + len(row["alt"]) - 1
 
                 # get allele counts
                 if len(row["ref"]) == len(row["alt"]) == 1: # snv
