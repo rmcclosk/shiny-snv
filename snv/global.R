@@ -5,7 +5,9 @@
 ################################################################################
 
 CHROMOSOMES <- c(1:22, "X")
-SNV.COLS <- c("chrom", "pos", "ref", "alt")
+DISALLOWED.CLASSES <- c("Intron", "5'UTR", "3'UTR", "5'Flank", "3'Flank", "IGR")
+BED.COLS <- c("chr", "start", "end")
+VARIANT.COLS <- c(BED.COLS, "start", "end")
 
 ################################################################################
 # Helper functions
@@ -65,37 +67,48 @@ add.zero.row <- function (df) {
 vaf.to.ccf <- function (vaf, tumor.purity, copy.number, prevalence) {
     avg.tum.copies <- copy.number*prevalence + 2*(1-prevalence)
     avg.copies <- (avg.tum.copies*tumor.purity + 2*(1-tumor.purity))
+    if (copy.number <= 2)
+        return(vaf*avg.copies/tumor.purity)
+
     ifelse(copy.number <= 2 | vaf <= tumor.purity / avg.copies,
            vaf * (avg.copies) / tumor.purity,
            vaf * (avg.copies) / (tumor.purity * (copy.number - 1)))
 }
 
-# find intervals which are nearest to a set of points, and return the value
-# associated to each interval 
-# points and intervals are assumed to be sorted
-find.intervals <- function (points, intervals, value) {
-    if (length(points) == 0) return (NULL)
-    if (nrow(intervals) == 1) return (rep(intervals[1,value], length(points)))
+# rearrange a data frame to be in BED file format
+# the data frame must have the columns "chr", "start", and "end"
+as.bed <- function (bed.df) {
+    bed.cols <- match(BED.COLS, colnames(bed.df))
+    stopifnot(all(!is.na(bed.cols)))
+    data.cols <- setdiff(1:ncol(bed.df), bed.cols)
+    bed.df[,c(bed.cols, data.cols)]
+}
 
-    # first point is before current interval
-    if (points[1] < intervals[1,1]) {
-        c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
+# write a data frame to a BED file
+# data frame must have the columns "chr", "start", and "end"
+# return the file name written to
+write.bed <- function (bed.df, bed.file=tempfile()) {
+    stopifnot(colnames(bed.df)[1:length(BED.COLS)] == BED.COLS)
+    write.table(bed.df, bed.file, col.names=F, row.name=F, sep="\t", quote=F)
+    bed.file
+}
 
-    # first point is between current and next interval
-    } else if (points[1] > intervals[1,2] & points[1] < intervals[2,1]) {
-        if (points[1] - intervals[1,2] <= intervals[2,1] - points[1])
-            c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
-        else
-            c(intervals[2,value], find.intervals(tail(points, -1), tail(intervals, -1), value))
-
-    # point is inside current interval
-    } else if (points[1] >= intervals[1,1] & points[1] <= intervals[1,2]) {
-        c(intervals[1,value], find.intervals(tail(points, -1), intervals, value))
-
-    # point is at or after start of next interval
+# run a bedtools command 
+# bed files should both have chr, start, end as their first three columns
+bedtools <- function (command, bed.a, bed.b=NULL, args="") {
+    bed.file.a <- write.bed(bed.a, "a.bed")
+    cmd <- paste("bedtools", command, args)
+    if (!is.null(bed.b)) {
+        bed.file.b <- write.bed(bed.b, "b.bed")
+        cmd <- paste(cmd, "-a", bed.file.a, "-b", bed.file.b)
     } else {
-        find.intervals(points, tail(intervals, -1), value)
+        cmd <- paste(cmd, "-i", bed.file.a)
     }
+    cat("Running", cmd, "... ")
+    output <- system(cmd, intern=T)
+    cat("done\n")
+    if (length(output) == 0) return (NULL)
+    read.table(textConnection(output), sep="\t")
 }
 
 ################################################################################
@@ -108,55 +121,72 @@ metadata <- read.table("../metadata.tsv", header=T)
 if (file.exists("vaf_processed.tsv")) {
     d <- read.table("vaf_processed.tsv", sep="\t", header=T)
 } else {
-    # include only patients with at least two samples
-    tumor.samples <- subset(metadata, time.point != 0)
-    counts <- aggregate(sample~patient, tumor.samples, length)
-    keep.patients <- unique(counts[counts$sample > 1, "patient"])
-    metadata <- metadata[metadata$patient %in% keep.patients,]
-    
     # read SNV information
-    d <- read.table("../vaf.tsv", header=T, sep="\t", fill=T, na.strings=c("NA", ""))
-    d <- d[d$chrom %in% CHROMOSOMES,]
-    d$chrom <- factor(d$chrom, levels=CHROMOSOMES)
-    d <- merge(d, metadata)
-    d <- d[d$time.point != 0,]
+    variants <- read.table("../variants.tsv", header=T, sep="\t")
+    variants <- subset(variants, chr %in% CHROMOSOMES & ! class %in% DISALLOWED.CLASSES)
+    variants$chr <- factor(variants$chr, levels=CHROMOSOMES)
 
     # read segments
     segments <- read.table("../segments.tsv", header=T, sep="\t")
-    segments$chrom <- factor(segments$chrom, levels=CHROMOSOMES)
-    
-    # remove positions with depth 0 in any sample
-    min.depth <- aggregate(depth~chrom+pos+ref+alt+patient, d, min)
-    keep.rows <- which(min.depth$depth > 0)
-    min.depth <- min.depth[keep.rows, c(SNV.COLS, "patient")]
-    d <- merge(d, min.depth)
-    
-    # calculate variant allele frequencies
-    d$vaf <- d$alt.count/d$depth
-    
-    # remove patients without segments
-    d <- d[d$sample %in% unique(segments$sample),]
+    segments$chr <- factor(segments$chr, levels=CHROMOSOMES)
+    segments <- subset(segments, end - start > 0)
+    segments[is.na(segments$prevalence), "prevalence"] <- 1
 
-    # order by patient and sample
-    d <- droplevels(d)
-    d$sample <- factor(d$sample, levels=levels(segments$sample))
-    d <- d[order(d$patient, d$time.point, d$sample, d$chrom, d$pos),]
-    
+    # include only samples with both segments and variants
+    keep.samples <- intersect(levels(segments$sample), levels(variants$sample))
+    metadata <- subset(metadata, sample %in% keep.samples)
+
+    # include only patients with more than one follow-up time point
+    counts <- aggregate(sample~patient, metadata, length)
+    keep.patients <- counts[counts$sample > 1, "patient"]
+    metadata <- droplevels(metadata[metadata$patient %in% keep.patients,])
+
+    # drop samples failing any previous criteria
+    keep.samples <- metadata$sample
+    print(keep.samples)
+    variants <- droplevels(as.bed(subset(variants, sample %in% keep.samples)))
+    levels(variants$sample) <- keep.samples
+    segments <- droplevels(as.bed(subset(segments, sample %in% keep.samples)))
+    levels(segments$sample) <- keep.samples
+
+    # find the segments which overlap each variant
+    variants <- do.call(rbind, by(segments, segments$sample, function (by.segments) {
+        # fill in gaps in the segments
+        compl <- bedtools("complement", by.segments, args="-g ../hg19.genome")
+        colnames(compl) <- BED.COLS
+        compl$sample <- by.segments[1, "sample"]
+        compl$copy.number <- 2
+        compl$prevalence <- 1
+        by.segments <- rbind(by.segments, compl)
+
+        by.variants <- subset(variants, sample == by.segments[1, "sample"])
+        intersect <- bedtools("intersect", by.variants, by.segments, "-loj")
+        old.names <- c(colnames(by.variants), colnames(by.segments))
+        new.names <- make.names(old.names, unique=T)
+        colnames(intersect) <- new.names
+        intersect[,c(colnames(by.variants), "copy.number", "prevalence")]
+    }, simplify=F))
+
+    # remove variants with depth 0 in any sample
+    min.depth <- aggregate(depth~chr+start+end+ref+alt+patient, variants, min)
+    min.depth <- subset(min.depth, depth > 0, select=c(VARIANT.COLS, "patient"))
+    variants <- merge(variants, min.depth)
+
+    # order variants and segments
+    var.order <- with(variants, order(patient, time.point, sample, chr, start))
+    seg.order <- with(segments, order(patient, time.point, sample, chr, start))
+    variants <- variants[var.order,]
+    segments <- segments[seg.order,]
+
     # give a unique key to each row
-    d$key <- 1:nrow(d)
+    variants$key <- 1:nrow(variants)
+    segments$key <- 1:nrow(segments)
 
-    # find copy number for each allele
-    aggregate(key~sample+chrom, d, function (idx) {
-        data <- d[idx,]
-        by.sample <- data[1, "sample"]
-        by.chrom <- data[1, "chrom"]
-        intervals <- subset(segments, sample == by.sample & chrom == by.chrom,
-                            select=c("start", "end", "copy.number"))
-        d[idx,"copy.number"] <<- find.intervals(data$pos, intervals, "copy.number")
-    })
+    # calculate variant allele frequencies
+    variants$vaf <- variants$alt.count/variants$depth
     
     # calculate corrected VAF
-    d$vaf.corrected <- vaf.to.ccf(d$vaf, d$purity/100, d$copy.number)
+    variants$vaf.corrected <- vaf.to.ccf(variants$vaf, variants$purity, variants$copy.number, variants$prevalence)
     conf.int <- t(mapply(function (x, n) {
         prop.test(x, n, conf.level=0.95, correct=F)$conf.int
     }, d$alt.count, d$depth))
@@ -171,7 +201,7 @@ if (file.exists("vaf_processed.tsv")) {
     })
     agg$max.change <- agg$key[,1]
     agg$max.change.uncorrected.samples <- agg$key[,2]
-    agg <- agg[,c(SNV.COLS, "max.change", "max.change.uncorrected.samples")]
+    agg <- agg[,c(VARIANT.COLS, "max.change", "max.change.uncorrected.samples")]
     
     # same thing but with corrected VAF
     agg2 <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
@@ -181,7 +211,7 @@ if (file.exists("vaf_processed.tsv")) {
     })
     agg2$max.change.corrected <- agg2$key[,1]
     agg2$max.change.corrected.samples <- agg2$key[,2]
-    agg2 <- agg2[,c(SNV.COLS, "max.change.corrected", "max.change.corrected.samples")]
+    agg2 <- agg2[,c(VARIANT.COLS, "max.change.corrected", "max.change.corrected.samples")]
     
     # list all patient ID's for each SNV
     agg3 <- aggregate(patient~chrom+pos+ref+alt, d, paste.unique)
