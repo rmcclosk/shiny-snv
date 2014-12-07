@@ -5,15 +5,15 @@ shinyServer(function(input, output) {
 
     # selector box for patients
     output$patient.select <- renderUI({
-        selectInput("patient", "Patient:", levels(d$patient))
+        selectInput("patient", "Patient:", unique(variants$patient))
     })
 
     # selector boxes for samples at each time point
     # TODO: should be disabled when only one sample is available
     output$sample.select <- renderUI({
-        m <- subset(metadata, patient==input$patient & time.point != 0)
+        m <- subset(metadata, patient==input$patient)
         do.call(tagList, as.list(by(m, m$time.point, function (s) {
-            tp <- s[1, "time.point"]
+            tp <- s[1, time.point]
             var <- paste0("tp", tp)
             label <- paste0("Time point ", tp, " sample:") 
             choices <- unique(as.character(s$sample))
@@ -21,105 +21,100 @@ shinyServer(function(input, output) {
         })))
     })
 
-    # select box for chromosomes
-    output$chrom.select <- renderUI({
-        html <- selectInput("chrom", "Chromosome:", levels(d$chrom), multi=T, selected=input$chrom)
-        if (input$all.chrom) 
+    # select box for chrosomes
+    output$chr.select <- renderUI({
+        html <- selectInput("chr", "Chromosome:", CHROMOSOMES, multi=T, selected=input$chr)
+        if (input$all.chr) 
             gsub("(<select[^>]*)>", "\\1 disabled>", html)
         else
             html
     })
 
-    plot.data <- reactive({
-        pd <- subset(d, patient == input$patient & time.point != 0)
+    plot.variants <- reactive({
+        d <- subset(variants, patient == input$patient)
 
-        # filter chromosomes
-        if (!input$all.chrom) pd <- subset(pd, chrom %in% input$chrom)
-
-        # filter silent mutations
-        if (input$hide.silent) pd <- subset(pd, class != "Silent")
-
-        if (nrow(pd) == 0) return (add.zero.row(pd))
+        # filter chrosomes and silent mutations
+        if (!input$all.chr) d <- subset(d, chr %in% input$chr)
+        if (input$hide.silent.plot) d <- subset(d, class != "Silent")
+        if (nrow(d) == 0) return (add.zero.row(d))
 
         # remove SNVs which fall below minimum coverage depth in any sample
-        min.depth <- aggregate(depth~chrom+pos+ref+alt, pd, min)
-        min.depth <- subset(min.depth, depth >= input$depth, select=SNV.COLS)
-        pd <- merge(pd, min.depth, by=SNV.COLS, suffixes=c("", ".min"))
+        min.depth <- aggregate(depth~chr+start+end+ref+alt, d, min)
+        min.depth <- subset(min.depth, depth >= input$depth, select=VARIANT.COLS)
+        d <- merge(d, min.depth, by=VARIANT.COLS, suffixes=c("", ".min"))
 
-        if (input$correct.purity) pd$vaf <- pd$vaf.corrected
+        if (input$correct.purity) d$vaf <- d$ccf
 
         # keep only SNVs which fall below a threshold in some sample
         if (input$maxmin < 1) {
-            min.freqs <- aggregate(vaf~chrom+pos+ref+alt, pd, min)
+            min.freqs <- aggregate(vaf~chr+start+end+ref+alt, d, min)
             min.freqs <- subset(min.freqs, vaf <= input$maxmin)
-            pd <- merge(pd, min.freqs, by=SNV.COLS, suffixes=c("", ".min"))
+            d <- merge(d, min.freqs, by=VARIANT.COLS, suffixes=c("", ".min"))
         }
 
-        samples <- sapply(unique(pd$time.point), function (tp) {
+        samples <- sapply(unique(d$time.point), function (tp) {
             input[[paste0("tp", tp)]]
         })
-        pd <- pd[pd$sample %in% samples,]
-
-        if (nrow(pd) == 0) return (add.zero.row(pd))
+        d <- d[d$sample %in% samples,]
+        if (nrow(d) == 0) return (add.zero.row(d))
 
 	    if (input$order == "Highest fraction") {
 	        aggfun <- sum
 	    } else if (input$order == "Most change") {
 	        aggfun <- function (x) max(abs(diff(x)))
 	    }
-	    agg <- aggregate(vaf~chrom+pos+ref+alt, pd, aggfun)
+	    agg <- aggregate(vaf~chr+start+end+ref+alt, d, aggfun)
 	    agg <- agg[order(-agg$vaf),]
 	    agg <- head(agg, input$n)
-        pd <- merge(pd, agg, by=SNV.COLS, suffixes=c("", ".agg"))
+        d <- merge(d, agg, by=VARIANT.COLS, suffixes=c("", ".agg"))
 
-        pd <- droplevels(pd[order(pd$time.point),])
-        pd
+        d <- droplevels(as.data.frame(d[order(d$time.point, d$chr, d$start),]))
+        d$chr <- factor(d$chr, levels=c(1:22, "X"))
+        d
     })
 
     tooltip <- function (x) {
-        pd <- isolate(plot.data())
+        d <- isolate(plot.variants())
         if (is.null(x$key)) {
-            point <- subset(pd, chrom==x$chrom & pos==x$pos & ref==x$ref & alt==x$alt)[1,]
+            point <- subset(d, chr==x$chr & start==x$start & end==x$end & ref==x$ref & alt==x$alt)[1,]
         } else {
-            point <- pd[pd$key == x$key,]
+            point <- d[d$key == x$key,]
         }
         if (nrow(point) == 0) return ("")
-        html <- paste0("<b>Chromosome: </b>", point$chrom, "</b><br />")
-        html <- paste0(html, "<b>Position: </b>", point$pos, "</b><br />")
-        html <- paste0(html, "<b>Reference: </b>", point$ref, "</b><br />")
-        html <- paste0(html, "<b>Variant: </b>", point$alt, "</b><br />")
+        html <- paste0("<b>Chromosome: </b>", point$chr, "</b><br />")
         html <- paste0(html, "<b>Gene: </b>", point$gene, "</b><br />")
-        if (!is.na(point$prot.change))
+        html <- paste0(html, "<b>Base change: </b>", point$ref, ">", point$alt, "</b><br />")
+        if (!is.na(point$prot.change) & point$prot.change != "")
             html <- paste0(html, "<b>Protein change: </b>", point$prot.change, "</b><br />")
-        if (!is.na(point$rs))
+        if (!is.na(point$rs) & point$rs != "")
             html <- paste0(html, "<b>dbSNP ID: </b>", point$rs, "</b><br />")
-        if (!is.na(point$cosmic))
+        if (!is.na(point$cosmic) & point$cosmic != "")
             html <- paste0(html, "<b>COSMIC ID: </b>", point$cosmic, "</b><br />")
-        if (!is.na(point$esp))
+        if (!is.na(point$esp) & point$esp != "")
             html <- paste0(html, "<b>ESP ID: </b>", point$esp, "</b><br />")
         html
     }
 
     # main plot
     freqPlot.vis <- reactive({
-        vis <- plot.data %>% 
-            ggvis(x=~factor(sample), y=~vaf) %>%
+        vis <- plot.variants() %>% 
+            ggvis(x=~sample, y=~vaf) %>%
             add_axis("x", title="sample") %>%
             add_axis("y", title="variant allele fraction") 
 
         if (input$color == "None") 
             vis <- vis %>% layer_points(key := ~key) 
         else if (input$color == "Chromosome")
-            vis <- vis %>% layer_points(key := ~key, fill=~chrom)
+            vis <- vis %>% layer_points(key := ~key, fill=~chr)
         else if (input$color == "Mutation type")
             vis <- vis %>% layer_points(key := ~key, fill=~class)
 
-        vis <- vis %>% group_by(chrom, pos, ref, alt)
+        vis <- vis %>% group_by(chr, start, end, ref, alt)
 
         if (input$color == "None")
             vis <- vis %>% layer_paths() 
         else if (input$color == "Chromosome")
-            vis <- vis %>% layer_paths(stroke=~chrom)
+            vis <- vis %>% layer_paths(stroke=~chr)
         else if (input$color == "Mutation type")
             vis <- vis %>% layer_paths(stroke=~class)
 
@@ -129,21 +124,18 @@ shinyServer(function(input, output) {
     freqPlot.vis %>% bind_shiny("freqPlot")
 
     overallTable <- reactive({
-        keep.cols <- c("chrom", "prot.change", "gene", "max.change",
-                       "max.change.corrected", "patients",
-                       "max.change.uncorrected.samples",
-                       "max.change.corrected.samples")
+        tbl <- overall
         if (input$hide.silent.table)
-            ft <- subset(d, class != "Silent", select=keep.cols)
-        else
-            ft <- subset(d, select=keep.cols)
-        ft <- ft[!duplicated(ft),]
-        ft$max.change <- round(ft$max.change, 3)
-        ft$max.change.corrected <- round(ft$max.change.corrected, 3)
-        ft
+            tbl <- subset(tbl, prot.change != "")
+
+        tbl$max.change.vaf <- round(tbl$max.change.vaf, 3)
+        tbl$max.change.ccf <- round(tbl$max.change.ccf, 3)
+        tbl$min.ccf <- round(tbl$min.ccf, 3)
+        tbl$min.vaf <- round(tbl$min.vaf, 3)
+        tbl
     })
 
-    output$freqTable <- renderDataTable({
+    output$table <- renderDataTable({
         overallTable()
     })
 

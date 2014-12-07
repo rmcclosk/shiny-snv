@@ -1,5 +1,8 @@
 #!/usr/bin/env Rscript
 
+options(warn=1)
+library(data.table)
+
 ################################################################################
 # Constants
 ################################################################################
@@ -7,7 +10,7 @@
 CHROMOSOMES <- c(1:22, "X")
 DISALLOWED.CLASSES <- c("Intron", "5'UTR", "3'UTR", "5'Flank", "3'Flank", "IGR")
 BED.COLS <- c("chr", "start", "end")
-VARIANT.COLS <- c(BED.COLS, "start", "end")
+VARIANT.COLS <- c(BED.COLS, "ref", "alt")
 
 ################################################################################
 # Helper functions
@@ -57,22 +60,36 @@ paste.unique <- function (x) {
 
 # Add a row of all zeros to an empty data.frame, preserving column names.
 add.zero.row <- function (df) {
-    names <- colnames(df)
-    df <- rbind(df, rep(0, ncol(df)))
-    colnames(df) <- names
-    df
+    new.row <- as.list(rep(0, ncol(df)))
+    names(new.row) <- colnames(df)
+    rbind(df, new.row)
 }
 
 # Correct variant allele fraction based on copy number and tumor purity.
-vaf.to.ccf <- function (vaf, tumor.purity, copy.number, prevalence) {
-    avg.tum.copies <- copy.number*prevalence + 2*(1-prevalence)
-    avg.copies <- (avg.tum.copies*tumor.purity + 2*(1-tumor.purity))
-    if (copy.number <= 2)
-        return(vaf*avg.copies/tumor.purity)
+# vaf: observed variant allele fraction
+# pur: tumor purity (number between 0 and 1)
+# cn: observed copy number state (non-negative integer)
+# prev: tumor cellular prevalence of CNA
+vaf.to.ccf <- function (vaf, pur, cn, prev) {
+    stopifnot(all(0 <= vaf & vaf <= 1))
+    stopifnot(all(0 <= pur & pur <= 1))
+    stopifnot(all(0 <= cn & cn %% 1 == 0))
+    stopifnot(all(0 <= prev & prev <= 1))
 
-    ifelse(copy.number <= 2 | vaf <= tumor.purity / avg.copies,
-           vaf * (avg.copies) / tumor.purity,
-           vaf * (avg.copies) / (tumor.purity * (copy.number - 1)))
+    avg.copies <- (cn*prev + 2*(1-prev))*pur + 2*(1-pur)
+    pur.bound <- (cn-1)*prev*pur/avg.copies
+    ccf.bound <- pur/avg.copies
+    midpoint <- mean(c(pur.bound, ccf.bound))
+    res <- ifelse(cn <= 2 | vaf <= midpoint,
+                  avg.copies*vaf/pur,
+                  avg.copies*vaf/pur - (cn-2)*prev)
+    impos <- sum(cn > 2 & vaf > ccf.bound & vaf < pur.bound)
+    ambig <- sum(cn > 2 & vaf < ccf.bound & vaf > pur.bound)
+    if (impos > 0)
+        warning(paste(impos, "impossible VAFs out of", length(vaf)))
+    if (ambig > 0)
+        warning(paste(ambig, "ambiguous VAFs out of", length(vaf)))
+    res
 }
 
 # rearrange a data frame to be in BED file format
@@ -81,7 +98,7 @@ as.bed <- function (bed.df) {
     bed.cols <- match(BED.COLS, colnames(bed.df))
     stopifnot(all(!is.na(bed.cols)))
     data.cols <- setdiff(1:ncol(bed.df), bed.cols)
-    bed.df[,c(bed.cols, data.cols)]
+    bed.df[,c(bed.cols, data.cols), with=F]
 }
 
 # write a data frame to a BED file
@@ -105,10 +122,28 @@ bedtools <- function (command, bed.a, bed.b=NULL, args="") {
         cmd <- paste(cmd, "-i", bed.file.a)
     }
     cat("Running", cmd, "... ")
-    output <- system(cmd, intern=T)
+    output <- paste(system(cmd, intern=T), collapse="\n")
     cat("done\n")
-    if (length(output) == 0) return (NULL)
-    read.table(textConnection(output), sep="\t")
+    if (output == "") return (NULL)
+    res <- fread(output)
+    if (ncol(res) == 3)
+        setnames(res, BED.COLS)
+    else if (ncol(res) == ncol(bed.a))
+        setnames(res, colnames(bed.a))
+    else if (ncol(res) == ncol(bed.a) + ncol(bed.b))
+        setnames(res, make.names(c(colnames(bed.a), colnames(bed.b)), unique=T))
+    else
+        res
+}
+
+# return the value in x with largest magnitude
+max.abs <- function (x) {
+    x[which.max(abs(x))]
+}
+
+# return the name of the value in x with largest magnitude
+max.abs.name <- function (x) {
+    names(x)[which.max(abs(x))]
 }
 
 ################################################################################
@@ -116,61 +151,36 @@ bedtools <- function (command, bed.a, bed.b=NULL, args="") {
 ################################################################################
 
 # read metadata
-metadata <- read.table("../metadata.tsv", header=T)
+metadata <- fread("../metadata.tsv", stringsAsFactors=T)
+metadata <- subset(metadata, time.point > 0, 
+                   select=c(patient, sample, purity, time.point))
 
-if (file.exists("vaf_processed.tsv")) {
-    d <- read.table("vaf_processed.tsv", sep="\t", header=T)
+if (all(file.exists(c("variants_processed.tsv", "overall.tsv")))) {
+    variants <- fread("variants_processed.tsv")
+    overall <- fread("overall.tsv")
 } else {
     # read SNV information
-    variants <- read.table("../variants.tsv", header=T, sep="\t")
+    classes <- list(character=c("chr", "rs"))
+    variants <- fread("../variants.tsv", colClasses=classes)
     variants <- subset(variants, chr %in% CHROMOSOMES & ! class %in% DISALLOWED.CLASSES)
-    variants$chr <- factor(variants$chr, levels=CHROMOSOMES)
 
     # read segments
-    segments <- read.table("../segments.tsv", header=T, sep="\t")
-    segments$chr <- factor(segments$chr, levels=CHROMOSOMES)
+    segments <- fread("../segments.tsv", colClasses=list(character=c("chr")))
     segments <- subset(segments, end - start > 0)
-    segments[is.na(segments$prevalence), "prevalence"] <- 1
+    segments[segments$copy.number == 2, "prevalence"] <- 1
 
-    # include only samples with both segments and variants
-    keep.samples <- intersect(levels(segments$sample), levels(variants$sample))
+    # keep only samples with both variants and segments
+    keep.samples <- intersect(unique(variants$sample), unique(segments$sample))
     metadata <- subset(metadata, sample %in% keep.samples)
 
     # include only patients with more than one follow-up time point
-    counts <- aggregate(sample~patient, metadata, length)
-    keep.patients <- counts[counts$sample > 1, "patient"]
-    metadata <- droplevels(metadata[metadata$patient %in% keep.patients,])
+    sample.count <- aggregate(sample~patient, metadata, length)
+    keep.patients <- subset(sample.count, sample > 1, select=patient)
+    metadata <- merge(metadata, keep.patients, by=c("patient"))
 
-    # drop samples failing any previous criteria
-    keep.samples <- metadata$sample
-    print(keep.samples)
-    variants <- droplevels(as.bed(subset(variants, sample %in% keep.samples)))
-    levels(variants$sample) <- keep.samples
-    segments <- droplevels(as.bed(subset(segments, sample %in% keep.samples)))
-    levels(segments$sample) <- keep.samples
-
-    # find the segments which overlap each variant
-    variants <- do.call(rbind, by(segments, segments$sample, function (by.segments) {
-        # fill in gaps in the segments
-        compl <- bedtools("complement", by.segments, args="-g ../hg19.genome")
-        colnames(compl) <- BED.COLS
-        compl$sample <- by.segments[1, "sample"]
-        compl$copy.number <- 2
-        compl$prevalence <- 1
-        by.segments <- rbind(by.segments, compl)
-
-        by.variants <- subset(variants, sample == by.segments[1, "sample"])
-        intersect <- bedtools("intersect", by.variants, by.segments, "-loj")
-        old.names <- c(colnames(by.variants), colnames(by.segments))
-        new.names <- make.names(old.names, unique=T)
-        colnames(intersect) <- new.names
-        intersect[,c(colnames(by.variants), "copy.number", "prevalence")]
-    }, simplify=F))
-
-    # remove variants with depth 0 in any sample
-    min.depth <- aggregate(depth~chr+start+end+ref+alt+patient, variants, min)
-    min.depth <- subset(min.depth, depth > 0, select=c(VARIANT.COLS, "patient"))
-    variants <- merge(variants, min.depth)
+    # merge metadata with segments and variants
+    variants <- as.bed(merge(variants, metadata, by=c("sample")))
+    segments <- as.bed(merge(segments, metadata, by=c("sample")))
 
     # order variants and segments
     var.order <- with(variants, order(patient, time.point, sample, chr, start))
@@ -178,48 +188,54 @@ if (file.exists("vaf_processed.tsv")) {
     variants <- variants[var.order,]
     segments <- segments[seg.order,]
 
+    # find the segments which overlap each variant
+    variants <- rbindlist(by(segments, segments$sample, function (by.segments) {
+        # get segment overlapping each variant
+        by.variants <- bedtools("sort", subset(variants, sample == by.segments[1, sample]))
+        by.segments <- bedtools("sort", by.segments)
+        closest <- bedtools("closest", by.variants, by.segments, args="-t first")
+        closest[,c(colnames(by.variants), "copy.number", "prevalence"), with=F]
+    }, simplify=F))
+
+    # remove variants with depth 0 in any sample
+    min.depth <- aggregate(depth~chr+start+end+ref+alt+patient, variants, min)
+    min.depth <- subset(min.depth, depth > 0, select=c(VARIANT.COLS, "patient"))
+    variants <- merge(variants, min.depth, by=colnames(min.depth))
+
     # give a unique key to each row
     variants$key <- 1:nrow(variants)
     segments$key <- 1:nrow(segments)
 
     # calculate variant allele frequencies
-    variants$vaf <- variants$alt.count/variants$depth
-    
-    # calculate corrected VAF
-    variants$vaf.corrected <- vaf.to.ccf(variants$vaf, variants$purity, variants$copy.number, variants$prevalence)
+    variants$vaf <- with(variants, alt.count/depth)
+    variants$ccf <- with(variants, vaf.to.ccf(vaf, purity, copy.number, prevalence))
+
+    # calculate confidence intervals around variant allele frequencies
     conf.int <- t(mapply(function (x, n) {
         prop.test(x, n, conf.level=0.95, correct=F)$conf.int
-    }, d$alt.count, d$depth))
-    d$ci.lower <- vaf.to.ccf(conf.int[,1], d$purity/100, d$copy.number)
-    d$ci.upper <- vaf.to.ccf(conf.int[,2], d$purity/100, d$copy.number)
-    
+    }, variants$alt.count, variants$depth))
+    variants$ci.lower <- conf.int[,1]
+    variants$ci.upper <- conf.int[,2]
+
     # find the maximum change of VAF between any pair of samples from any patient
-    agg <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
-        diffs <- all.diffs(d[idx,], "vaf")
-        max.idx <- which.max(abs(diffs))
-        c(diffs[max.idx], names(diffs)[max.idx])
-    })
-    agg$max.change <- agg$key[,1]
-    agg$max.change.uncorrected.samples <- agg$key[,2]
-    agg <- agg[,c(VARIANT.COLS, "max.change", "max.change.uncorrected.samples")]
-    
-    # same thing but with corrected VAF
-    agg2 <- aggregate(key~chrom+pos+ref+alt, d, function (idx) {
-        diffs <- all.diffs(d[idx,], "vaf.corrected")
-        max.idx <- which.max(abs(diffs))
-        c(diffs[max.idx], names(diffs)[max.idx])
-    })
-    agg2$max.change.corrected <- agg2$key[,1]
-    agg2$max.change.corrected.samples <- agg2$key[,2]
-    agg2 <- agg2[,c(VARIANT.COLS, "max.change.corrected", "max.change.corrected.samples")]
-    
-    # list all patient ID's for each SNV
-    agg3 <- aggregate(patient~chrom+pos+ref+alt, d, paste.unique)
-    colnames(agg3)[5] <- "patients"
-    
-    # merge everything
-    overall <- merge(merge(agg, agg2), agg3)
-    d <- merge(d, overall)
-    
-    write.table(d, file="vaf_processed.tsv", sep="\t", row.names=F, quote=F)
+    overall <- unique(variants[, 
+        list(prot.change,
+             gene,
+             max.change.vaf = max.abs(all.diffs(.SD, "vaf")), 
+             max.change.vaf.samples = max.abs.name(all.diffs(.SD, "vaf")), 
+             max.change.ccf = max.abs(all.diffs(.SD, "ccf")),
+             max.change.ccf.samples = max.abs.name(all.diffs(.SD, "ccf")),
+             min.vaf = min(vaf),
+             min.ccf = min(ccf),
+             patients = paste.unique(patient)),
+        by=list(chr,start,end,ref,alt)
+    ])
+    overall$start <- NULL
+    overall$end <- NULL
+    overall$ref <- NULL
+    overall$alt <- NULL
+    cat("Finished processing variants")
+
+    write.table(overall, file="overall.tsv", sep="\t", row.names=F, quote=F)
+    write.table(variants, file="variants_processed.tsv", sep="\t", row.names=F, quote=F)
 }

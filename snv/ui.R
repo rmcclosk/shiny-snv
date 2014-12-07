@@ -1,19 +1,19 @@
 library(shiny)
 library(ggvis)
 
-shinyUI(navbarPage("VAF",
+shinyUI(navbarPage("",
 
-  tabPanel("By patient",
+  tabPanel("VAF by patient",
     sidebarLayout(
       sidebarPanel(
         uiOutput("patient.select"),
         uiOutput("sample.select"),
-        uiOutput("chrom.select"),
-        checkboxInput("all.chrom", "Select all chromosomes", value=T),
+        uiOutput("chr.select"),
+        checkboxInput("all.chr", "Select all chromosomes", value=T),
         br(),
         sliderInput("depth", "Minimum coverage depth:", min=0, max=100, step=1, value=0),
         selectInput("color", "Color by:", c("None", "Chromosome", "Mutation type")),
-        checkboxInput("hide.silent", "Hide silent mutations"),
+        checkboxInput("hide.silent.plot", "Hide silent mutations"),
         br(),
         sliderInput("n", "Number to show:", min=0, max=100, step=1, value=20),
         selectInput("order", "Order by:", c("Highest fraction", "Most change")),
@@ -27,7 +27,7 @@ shinyUI(navbarPage("VAF",
     )
   ),
 
-  tabPanel("Overall",
+  tabPanel("VAF overall",
     fluidPage(
         fluidRow( 
             wellPanel(
@@ -39,7 +39,7 @@ shinyUI(navbarPage("VAF",
                 )
             )
         ),
-        fluidRow( column(12, dataTableOutput("freqTable") ))
+        fluidRow( column(12, dataTableOutput("table") ))
     )
   )
 ))
