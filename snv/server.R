@@ -68,9 +68,7 @@ shinyServer(function(input, output) {
 	    agg <- head(agg, input$n)
         d <- merge(d, agg, by=VARIANT.COLS, suffixes=c("", ".agg"))
 
-        d <- droplevels(as.data.frame(d[order(d$time.point, d$chr, d$start),]))
-        d$chr <- factor(d$chr, levels=c(1:22, "X"))
-        d
+        as.data.frame(d[order(d$time.point, d$chr, d$start),])
     })
 
     tooltip <- function (x) {
@@ -105,18 +103,22 @@ shinyServer(function(input, output) {
         if (input$color == "None") 
             vis <- vis %>% layer_points(key := ~key) 
         else if (input$color == "Chromosome")
-            vis <- vis %>% layer_points(key := ~key, fill=~chr)
+            vis <- vis %>% layer_points(key := ~key, fill=~chr) %>%
+                scale_nominal("fill", domain=CHROMOSOMES, range=substr(rainbow(23), 1, 7))
         else if (input$color == "Mutation type")
-            vis <- vis %>% layer_points(key := ~key, fill=~class)
+            vis <- vis %>% layer_points(key := ~key, fill=~class) %>%
+                scale_nominal("fill", domain=unique(variants$class), range=substr(rainbow(length(unique(variants$class))), 1, 7))
 
         vis <- vis %>% group_by(chr, start, end, ref, alt)
 
         if (input$color == "None")
             vis <- vis %>% layer_paths() 
         else if (input$color == "Chromosome")
-            vis <- vis %>% layer_paths(stroke=~chr)
+            vis <- vis %>% layer_paths(stroke=~chr) %>%
+                scale_nominal("stroke", domain=CHROMOSOMES, range=substr(rainbow(23), 1, 7))
         else if (input$color == "Mutation type")
-            vis <- vis %>% layer_paths(stroke=~class)
+            vis <- vis %>% layer_paths(stroke=~class) %>%
+                scale_nominal("stroke", domain=unique(variants$class), range=substr(rainbow(length(unique(variants$class))), 1, 7))
 
         vis %>% add_tooltip(tooltip, "hover")
     })
