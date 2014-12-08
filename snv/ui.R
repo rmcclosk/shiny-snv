@@ -6,10 +6,10 @@ shinyUI(navbarPage("",
   tabPanel("VAF by patient",
     sidebarLayout(
       sidebarPanel(
-        uiOutput("patient.select"),
-        uiOutput("sample.select"),
-        uiOutput("chr.select"),
-        checkboxInput("all.chr", "Select all chromosomes", value=T),
+        uiOutput("patient.select.vaf"),
+        uiOutput("sample.select.vaf"),
+        uiOutput("chr.select.vaf"),
+        checkboxInput("all.chr.vaf", "Select all chromosomes", value=T),
         br(),
         sliderInput("depth", "Minimum coverage depth:", min=0, max=100, step=1, value=0),
         selectInput("color", "Color by:", c("None", "Chromosome", "Mutation type")),
@@ -40,6 +40,21 @@ shinyUI(navbarPage("",
             )
         ),
         fluidRow( column(12, dataTableOutput("table") ))
+    )
+  ),
+
+  tabPanel("CNA by patient",
+    sidebarLayout(
+      sidebarPanel(
+        uiOutput("patient.select.cna"),
+        uiOutput("sample.select.cna")
+        #uiOutput("chr.select.cna"),
+        #checkboxInput("all.chr.cna", "Select all chromosomes", value=T)
+      ),
+  
+      mainPanel(
+        plotOutput("segsPlot")
+      )
     )
   )
 ))

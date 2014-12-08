@@ -2,6 +2,7 @@
 
 options(warn=1)
 library(data.table)
+library(bit64)
 
 ################################################################################
 # Constants
@@ -132,6 +133,8 @@ bedtools <- function (command, bed.a, bed.b=NULL, args="") {
         setnames(res, colnames(bed.a))
     else if (ncol(res) == ncol(bed.a) + ncol(bed.b))
         setnames(res, make.names(c(colnames(bed.a), colnames(bed.b)), unique=T))
+    else if (ncol(res) == ncol(bed.a) + ncol(bed.b) + 1)
+        setnames(res, make.names(c(colnames(bed.a), colnames(bed.b), "overlap"), unique=T))
     else
         res
 }
@@ -152,12 +155,17 @@ max.abs.name <- function (x) {
 
 # read metadata
 metadata <- fread("../metadata.tsv", stringsAsFactors=T)
+genome <- setNames(fread("../hg19.genome", header=F), c("chr", "chr.length"))
+genome$chr.start <- cumsum(c(0, head(as.numeric(genome$chr.length), -1)))
+genome <- subset(genome, chr %in% c(1:22, "X"))
 metadata <- subset(metadata, time.point > 0, 
                    select=c(patient, sample, purity, time.point))
 
-if (all(file.exists(c("variants_processed.tsv", "overall.tsv")))) {
-    variants <- fread("variants_processed.tsv")
-    overall <- fread("overall.tsv")
+files <- c("vaf_by_patient.tsv", "vaf_overall.tsv", "cna_by_patient.tsv")
+if (all(file.exists(c(files)))) {
+    variants <- fread("vaf_by_patient.tsv")
+    overall <- fread("vaf_overall.tsv")
+    segments <- fread("cna_by_patient.tsv")
 } else {
     # read SNV information
     classes <- list(character=c("chr", "rs"))
@@ -168,6 +176,9 @@ if (all(file.exists(c("variants_processed.tsv", "overall.tsv")))) {
     segments <- fread("../segments.tsv", colClasses=list(character=c("chr")))
     segments <- subset(segments, end - start > 0)
     segments[segments$copy.number == 2, "prevalence"] <- 1
+    segments <- merge(segments, genome, by=c("chr"))
+    segments$abs.start <- as.numeric(segments$chr.start + segments$start)
+    segments$abs.end <- as.numeric(segments$chr.start + segments$end)
 
     # keep only samples with both variants and segments
     keep.samples <- intersect(unique(variants$sample), unique(segments$sample))
@@ -181,6 +192,12 @@ if (all(file.exists(c("variants_processed.tsv", "overall.tsv")))) {
     # merge metadata with segments and variants
     variants <- as.bed(merge(variants, metadata, by=c("sample")))
     segments <- as.bed(merge(segments, metadata, by=c("sample")))
+
+    # add heterozygous segments to make prevalence up to 1
+    hetero.seg <- subset(segments, copy.number != 2)
+    hetero.seg$copy.number <- 2
+    hetero.seg$prevalence <- 1-hetero.seg$prevalence
+    segments <- rbind(segments, hetero.seg)
 
     # order variants and segments
     var.order <- with(variants, order(patient, time.point, sample, chr, start))
@@ -236,6 +253,30 @@ if (all(file.exists(c("variants_processed.tsv", "overall.tsv")))) {
     overall$alt <- NULL
     cat("Finished processing variants")
 
-    write.table(overall, file="overall.tsv", sep="\t", row.names=F, quote=F)
-    write.table(variants, file="variants_processed.tsv", sep="\t", row.names=F, quote=F)
+    write.table(overall, file="vaf_overall.tsv", sep="\t", row.names=F, quote=F)
+    write.table(variants, file="vaf_by_patient.tsv", sep="\t", row.names=F, quote=F)
+    write.table(segments, file="cna_by_patient.tsv", sep="\t", row.names=F, quote=F)
 }
+
+# Euclidian distance between two sets of segments
+# this only takes into account segments which are overlapping between the two
+# samples
+sample.dist <- function (s1, s2) {
+    segs1 <- subset(segments, sample == s1)
+    segs2 <- subset(segments, sample == s2)
+    intersect <- bedtools("intersect", segs1, segs2, "-wo")
+    intersect <- subset(intersect, !is.na(copy.number))
+    with(intersect, sqrt(sum((abs(copy.number - copy.number.1)*overlap)^2)))
+}
+
+# hierarchical clustering for dendrograms
+hclusts <- lapply(unique(segments$patient), function (by.patient) {
+    samples <- subset(metadata, patient==by.patient & time.point > 0)$sample
+    m <- matrix(apply(expand.grid(samples, samples), 1, function (row) {
+        sample.dist(row[1], row[2])
+    }), ncol=length(samples))
+    rownames(m) <- samples
+    colnames(m) <- samples
+    hclust(as.dist(m))
+})
+names(hclusts) <- unique(segments$patient)
