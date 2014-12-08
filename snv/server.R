@@ -180,12 +180,13 @@ shinyServer(function(input, output) {
         starts <- genome$chr.start
         breaks <- starts + genome$chr.length/2
         ggplot(d, aes(x=abs.start, y=copy.number, color=sample)) +
+            scale_x_continuous(limits=c(0, sum(as.numeric(genome$chr.length))), expand=c(0, 0), breaks=breaks, labels=c(1:22, "X")) +
             geom_segment(aes(xend=abs.end, yend=copy.number, size=prevalence)) +
             theme_bw() +
             ylab("copy number") +
             xlab("chromosome") +
             theme(axis.ticks.x=element_blank()) +
-            scale_x_continuous(breaks=breaks, labels=c(1:22, "X"))
+            geom_vline(data=genome, aes(xintercept=chr.start), linetype="dashed", color="grey")
     })
 
     # plot hierarchical clustering
