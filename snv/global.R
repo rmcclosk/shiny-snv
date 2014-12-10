@@ -114,10 +114,10 @@ write.bed <- function (bed.df, bed.file=tempfile()) {
 # run a bedtools command 
 # bed files should both have chr, start, end as their first three columns
 bedtools <- function (command, bed.a, bed.b=NULL, args="") {
-    bed.file.a <- write.bed(bed.a, "a.bed")
+    bed.file.a <- write.bed(bed.a)
     cmd <- paste("bedtools", command, args)
     if (!is.null(bed.b)) {
-        bed.file.b <- write.bed(bed.b, "b.bed")
+        bed.file.b <- write.bed(bed.b)
         cmd <- paste(cmd, "-a", bed.file.a, "-b", bed.file.b)
     } else {
         cmd <- paste(cmd, "-i", bed.file.a)
@@ -262,8 +262,9 @@ if (all(file.exists(c(files)))) {
 # this only takes into account segments which are overlapping between the two
 # samples
 sample.dist <- function (s1, s2) {
-    segs1 <- subset(segments, sample == s1)
-    segs2 <- subset(segments, sample == s2)
+    if (s1 == s2) return (0)
+    segs1 <- subset(segments, sample == s1, select=c(BED.COLS, "copy.number"))
+    segs2 <- subset(segments, sample == s2, select=c(BED.COLS, "copy.number"))
     intersect <- bedtools("intersect", segs1, segs2, "-wo")
     intersect <- subset(intersect, !is.na(copy.number))
     with(intersect, sqrt(sum((abs(copy.number - copy.number.1)*overlap)^2)))
