@@ -193,6 +193,15 @@ if (all(file.exists(c(files)))) {
     variants <- as.bed(merge(variants, metadata, by=c("sample")))
     segments <- as.bed(merge(segments, metadata, by=c("sample")))
 
+    # find the segments which overlap each variant
+    variants <- rbindlist(by(segments, segments$sample, function (by.segments) {
+        # get segment overlapping each variant
+        by.variants <- bedtools("sort", subset(variants, sample == by.segments[1, sample]))
+        by.segments <- bedtools("sort", by.segments)
+        closest <- bedtools("closest", by.variants, by.segments, args="-t first")
+        closest[,c(colnames(by.variants), "copy.number", "prevalence"), with=F]
+    }, simplify=F))
+
     # add heterozygous segments to make prevalence up to 1
     hetero.seg <- subset(segments, copy.number != 2)
     hetero.seg$copy.number <- 2
@@ -204,15 +213,6 @@ if (all(file.exists(c(files)))) {
     seg.order <- with(segments, order(patient, time.point, sample, chr, start))
     variants <- variants[var.order,]
     segments <- segments[seg.order,]
-
-    # find the segments which overlap each variant
-    variants <- rbindlist(by(segments, segments$sample, function (by.segments) {
-        # get segment overlapping each variant
-        by.variants <- bedtools("sort", subset(variants, sample == by.segments[1, sample]))
-        by.segments <- bedtools("sort", by.segments)
-        closest <- bedtools("closest", by.variants, by.segments, args="-t first")
-        closest[,c(colnames(by.variants), "copy.number", "prevalence"), with=F]
-    }, simplify=F))
 
     # remove variants with depth 0 in any sample
     min.depth <- aggregate(depth~chr+start+end+ref+alt+patient, variants, min)
