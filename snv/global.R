@@ -67,30 +67,33 @@ add.zero.row <- function (df) {
 }
 
 # Correct variant allele fraction based on copy number and tumor purity.
-# vaf: observed variant allele fraction
-# pur: tumor purity (number between 0 and 1)
-# cn: observed copy number state (non-negative integer)
-# prev: tumor cellular prevalence of CNA
-vaf.to.ccf <- function (vaf, pur, cn, prev) {
-    stopifnot(all(0 <= vaf & vaf <= 1))
-    stopifnot(all(0 <= pur & pur <= 1))
-    stopifnot(all(0 <= cn & cn %% 1 == 0))
-    stopifnot(all(0 <= prev & prev <= 1))
+vaf.to.ccf <- function (vaf, pur, prev, minor.cn, major.cn) {
+    cn <- major.cn + minor.cn
+    alpha <- (cn*prev + 2*(1-prev))*pur + 2*(1-pur)
 
-    avg.copies <- (cn*prev + 2*(1-prev))*pur + 2*(1-pur)
-    pur.bound <- (cn-1)*prev*pur/avg.copies
-    ccf.bound <- pur/avg.copies
-    midpoint <- mean(c(pur.bound, ccf.bound))
-    res <- ifelse(cn <= 2 | vaf <= midpoint,
-                  avg.copies*vaf/pur,
-                  avg.copies*vaf/pur - (cn-2)*prev)
-    impos <- sum(cn > 2 & vaf > ccf.bound & vaf < pur.bound)
-    ambig <- sum(cn > 2 & vaf < ccf.bound & vaf > pur.bound)
-    if (impos > 0)
-        warning(paste(impos, "impossible VAFs out of", length(vaf)))
-    if (ambig > 0)
-        warning(paste(ambig, "ambiguous VAFs out of", length(vaf)))
-    res
+    if (minor.cn <= 1 & major.cn <= 1) {
+        alpha*vaf/pur
+
+    } else if (minor.cn == 1) {
+        if (vaf >= (major.cn*prev+1)*pur/(2*alpha))
+            alpha*vaf/pur - (major.cn-1)*prev
+        else
+            alpha*vaf/pur
+
+    } else if (minor.cn == 0) {
+        if (vaf >= (1+(major.cn-1)*prev)*pur/(2*alpha))
+            alpha*vaf/pur - (major.cn-1)*prev
+        else
+            alpha*vaf/pur
+
+    } else {
+        if (vaf <= (1+(minor.cn-1)*prev)*pur/(2*alpha))
+            alpha*vaf/pur
+        else if (vaf >= (1+(major.cn+minor.cn-1)*prev)*pur/(2*alpha))
+            alpha*vaf/pur - (major.cn-1)*prev
+        else
+            alpha*vaf/pur - (minor.cn-1)*prev
+    }   
 }
 
 # rearrange a data frame to be in BED file format
@@ -175,7 +178,7 @@ if (all(file.exists(c(files)))) {
     # read segments
     segments <- fread("../segments.tsv", colClasses=list(character=c("chr")))
     segments <- subset(segments, end - start > 0)
-    segments[segments$copy.number == 2, "prevalence"] <- 1
+    segments[segments$minor.cn == 1 & segments$major.cn == 1, "prevalence"] <- 1
     segments <- merge(segments, genome, by=c("chr"))
     segments$abs.start <- as.numeric(segments$chr.start + segments$start)
     segments$abs.end <- as.numeric(segments$chr.start + segments$end)
@@ -199,12 +202,14 @@ if (all(file.exists(c(files)))) {
         by.variants <- bedtools("sort", subset(variants, sample == by.segments[1, sample]))
         by.segments <- bedtools("sort", by.segments)
         closest <- bedtools("closest", by.variants, by.segments, args="-t first")
-        closest[,c(colnames(by.variants), "copy.number", "prevalence"), with=F]
+        closest[,c(colnames(by.variants), "copy.number", "major.cn", "minor.cn", "prevalence"), with=F]
     }, simplify=F))
 
     # add heterozygous segments to make prevalence up to 1
-    hetero.seg <- subset(segments, copy.number != 2)
+    hetero.seg <- subset(segments, major.cn != 1 | minor.cn != 1)
     hetero.seg$copy.number <- 2
+    hetero.seg$major.cn <- 1
+    hetero.seg$minor.cn <- 1
     hetero.seg$prevalence <- 1-hetero.seg$prevalence
     segments <- rbind(segments, hetero.seg)
 
@@ -225,7 +230,7 @@ if (all(file.exists(c(files)))) {
 
     # calculate variant allele frequencies
     variants$vaf <- with(variants, alt.count/depth)
-    variants$ccf <- with(variants, vaf.to.ccf(vaf, purity, copy.number, prevalence))
+    variants$ccf <- with(variants, mapply(vaf.to.ccf, vaf, purity, minor.cn, major.cn, prevalence))
 
     # calculate confidence intervals around variant allele frequencies
     conf.int <- t(mapply(function (x, n) {
